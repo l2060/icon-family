@@ -1,0 +1,18 @@
+{
+  "name": "iconfamily",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A compact icon library manager with iconfont search/import and deterministic iconfont.js builds.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "scripts": {
+    "start": "node --use-system-ca server/index.mjs",
+    "dev": "node --use-system-ca --watch server/index.mjs",
+    "test": "node --test",
+    "build": "node scripts/package.mjs --check",
+    "package": "node scripts/package.mjs",
+    "deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy.ps1"
+  }
+}
