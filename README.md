@@ -2,6 +2,11 @@
 
 一个单体部署的图标库管理器：左侧项目列表，右侧项目图标工作区，支持 SVG 导入、iconfont.cn 搜索导入、SVG 编辑、批量去色/调整边距/移除前缀，以及生成 `iconfont.js`。
 
+
+
+[![snapshot](./snapshot.png)](./snapshot.png)
+
+
 ## 运行要求
 
 - Node.js 22.15 或更高版本（使用内置 `node:sqlite` 和系统 CA，无需额外数据库）
