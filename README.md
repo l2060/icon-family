@@ -4,7 +4,7 @@
 
 
 
-[![snapshot](./snapshot.png)](./snapshot.png)
+[![snapshot](./snipaste.png)](./snipaste.png)
 
 
 ## 运行要求
