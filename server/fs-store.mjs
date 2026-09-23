@@ -18,7 +18,7 @@ function projectView(state, project) {
 function iconView(icon) {
   if (!icon) return null;
   const { source_meta, padding_top, padding_right, padding_bottom, padding_left, ...publicIcon } = icon;
-  return { ...publicIcon, sourceMeta: source_meta ?? null };
+  return { ...publicIcon, folder_id: icon.folder_id ?? null, sourceMeta: source_meta ?? null };
 }
 
 export class JsonStore {
@@ -26,7 +26,7 @@ export class JsonStore {
     this.dataDir = dataDir;
     this.file = path.join(dataDir, 'metadata.json');
     this.inTransaction = false;
-    this.state = { nextIds: { users: 1, projects: 1, icons: 1, builds: 1, importJobs: 1 }, users: [], sessions: [], projects: [], icons: [], builds: [], importJobs: [], apiTokens: [] };
+    this.state = { nextIds: { users: 1, projects: 1, icons: 1, builds: 1, importJobs: 1, cartItems: 1 }, users: [], sessions: [], projects: [], icons: [], builds: [], importJobs: [], apiTokens: [], cartItems: [] };
     this.load();
   }
 
@@ -48,6 +48,26 @@ export class JsonStore {
   }
 
   close() {}
+
+  listCart(userId) {
+    return this.state.cartItems.filter(item => item.userId === userId).sort((a, b) => b.id - a.id)
+      .map(({ userId: owner, ...item }) => clone(item));
+  }
+
+  addCartItem(userId, item) {
+    const existing = this.state.cartItems.find(row => row.userId === userId && row.remoteId === item.remoteId);
+    if (!existing) {
+      this.state.cartItems.push({ ...item, id: this.idFor('cartItems'), userId, createdAt: timestamp() });
+      this.save();
+    }
+    return this.listCart(userId).find(row => row.remoteId === item.remoteId);
+  }
+
+  removeCartItems(userId, ids) {
+    const selected = new Set(ids);
+    this.state.cartItems = this.state.cartItems.filter(item => item.userId !== userId || !selected.has(item.id));
+    this.save();
+  }
 
   transaction(callback) {
     const snapshot = clone(this.state);
@@ -115,6 +135,15 @@ export class JsonStore {
     return true;
   }
 
+  changePassword(id, password, currentPassword) {
+    const user = this.state.users.find((candidate) => Number(candidate.id) === Number(id) && candidate.status === 'active');
+    if (!user || (currentPassword !== undefined && !verifyPassword(currentPassword, user.password_hash))) return false;
+    user.password_hash = hashPassword(password);
+    this.state.sessions = this.state.sessions.filter((session) => session.user_id !== user.id);
+    this.save();
+    return true;
+  }
+
   createSession(userId) {
     const token = crypto.randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -141,7 +170,7 @@ export class JsonStore {
   }
 
   listProjects(user) {
-    return this.state.projects.filter((project) => user.role === 'admin' || project.owner_id === user.id).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at))).map((project) => projectView(this.state, project));
+    return this.state.projects.filter((project) => user.role === 'admin' || project.owner_id === user.id || project.settings?.everyoneCanEdit === true || (project.settings?.collaboratorIds || []).includes(user.id)).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at))).map((project) => projectView(this.state, project));
   }
 
   projectById(id) { return projectView(this.state, this.state.projects.find((project) => Number(project.id) === Number(id))); }
@@ -173,6 +202,20 @@ export class JsonStore {
   listIcons(projectId, search = '') {
     const needle = String(search).toLowerCase();
     return this.state.icons.filter((icon) => Number(icon.project_id) === Number(projectId) && icon.status === 'active' && (!needle || `${icon.name} ${icon.slug}`.toLowerCase().includes(needle))).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)) || Number(b.id) - Number(a.id)).map(iconView);
+  }
+
+  setFolders(projectId, folders) {
+    const project = this.state.projects.find(project => Number(project.id) === Number(projectId));
+    project.settings = { ...project.settings, folders };
+    this.save();
+  }
+
+  moveIcons(projectId, ids, folderId) {
+    const selected = new Set(ids);
+    for (const icon of this.state.icons) {
+      if (Number(icon.project_id) === Number(projectId) && selected.has(Number(icon.id)) && icon.status === 'active') icon.folder_id = folderId;
+    }
+    this.save();
   }
 
   iconById(id) { return iconView(this.state.icons.find((icon) => Number(icon.id) === Number(id))); }

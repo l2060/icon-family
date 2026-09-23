@@ -9,9 +9,17 @@ $env:ADMIN_PASSWORD = $AdminPassword
 $env:DATA_DIR = Join-Path (Get-Location) "data"
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-  throw "Node.js 22.5 or newer is required."
+  throw "Node.js 22.15 or newer is required."
 }
 
+if (Test-Path -LiteralPath "src") {
+  if (-not (Test-Path -LiteralPath "node_modules")) {
+    npm ci
+    if ($LASTEXITCODE -ne 0) { throw "Dependency installation failed." }
+  }
+  npm run build
+  if ($LASTEXITCODE -ne 0) { throw "Build failed." }
+}
 New-Item -ItemType Directory -Force -Path $env:DATA_DIR | Out-Null
 Write-Host "IconFamily starting on http://localhost:$Port"
 node --use-system-ca server/index.mjs

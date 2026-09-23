@@ -70,6 +70,14 @@ export class Store {
         expires_at TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS cart_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        remote_id TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(user_id, remote_id)
+      );
       CREATE TABLE IF NOT EXISTS projects (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -140,9 +148,29 @@ export class Store {
         revoked_at TEXT
       );
     `);
+    if (!this.db.prepare('PRAGMA table_info(icons)').all().some(column => column.name === 'folder_id')) {
+      this.db.exec('ALTER TABLE icons ADD COLUMN folder_id TEXT DEFAULT NULL');
+    }
   }
 
   close() { this.db.close(); }
+
+  listCart(userId) {
+    return this.db.prepare('SELECT id,payload,created_at FROM cart_items WHERE user_id=? ORDER BY id DESC').all(userId)
+      .map(row => ({ ...parseJson(row.payload, {}), id: Number(row.id), createdAt: row.created_at }));
+  }
+
+  addCartItem(userId, item) {
+    this.db.prepare('INSERT INTO cart_items(user_id,remote_id,payload,created_at) VALUES(?,?,?,?) ON CONFLICT(user_id,remote_id) DO NOTHING')
+      .run(userId, item.remoteId, JSON.stringify(item), now());
+    const row = this.db.prepare('SELECT id,payload,created_at FROM cart_items WHERE user_id=? AND remote_id=?').get(userId, item.remoteId);
+    return { ...parseJson(row.payload, {}), id: Number(row.id), createdAt: row.created_at };
+  }
+
+  removeCartItems(userId, ids) {
+    const statement = this.db.prepare('DELETE FROM cart_items WHERE user_id=? AND id=?');
+    this.transaction(() => { for (const id of ids) statement.run(userId, id); });
+  }
 
   transaction(callback) {
     this.db.exec('BEGIN IMMEDIATE');
@@ -197,6 +225,19 @@ export class Store {
     return true;
   }
 
+  changePassword(id, password, currentPassword) {
+    const user = this.db.prepare("SELECT * FROM users WHERE id=? AND status='active'").get(id);
+    if (!user || (currentPassword !== undefined && !verifyPassword(currentPassword, user.password_hash))) return false;
+    const encoded = hashPassword(password);
+    this.db.exec('BEGIN');
+    try {
+      this.db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(encoded, id);
+      this.db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
+      this.db.exec('COMMIT');
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    return true;
+  }
+
   createSession(userId) {
     const token = crypto.randomBytes(32).toString('base64url');
     const expiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -222,10 +263,8 @@ export class Store {
   cleanupSessions() { this.db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(now()); }
 
   listProjects(user) {
-    const rows = user.role === 'admin'
-      ? this.db.prepare(`SELECT p.*,u.username AS owner_name,(SELECT COUNT(*) FROM icons i WHERE i.project_id=p.id AND i.status='active') AS icon_count FROM projects p JOIN users u ON u.id=p.owner_id ORDER BY p.updated_at DESC`).all()
-      : this.db.prepare(`SELECT p.*,u.username AS owner_name,(SELECT COUNT(*) FROM icons i WHERE i.project_id=p.id AND i.status='active') AS icon_count FROM projects p JOIN users u ON u.id=p.owner_id WHERE p.owner_id=? ORDER BY p.updated_at DESC`).all(user.id);
-    return rows.map(projectRow);
+    const rows = this.db.prepare(`SELECT p.*,u.username AS owner_name,(SELECT COUNT(*) FROM icons i WHERE i.project_id=p.id AND i.status='active') AS icon_count FROM projects p JOIN users u ON u.id=p.owner_id ORDER BY p.updated_at DESC`).all();
+    return rows.map(projectRow).filter((project) => user.role === 'admin' || project.owner_id === user.id || project.settings?.everyoneCanEdit === true || (project.settings?.collaboratorIds || []).includes(user.id));
   }
 
   projectById(id) {
@@ -255,6 +294,17 @@ export class Store {
 
   deleteProject(id) {
     this.db.prepare('DELETE FROM projects WHERE id=?').run(id);
+  }
+
+  setFolders(projectId, folders) {
+    const project = this.projectById(projectId);
+    this.db.prepare('UPDATE projects SET settings=? WHERE id=?')
+      .run(JSON.stringify({ ...project.settings, folders }), projectId);
+  }
+
+  moveIcons(projectId, ids, folderId) {
+    const statement = this.db.prepare("UPDATE icons SET folder_id=? WHERE id=? AND project_id=? AND status='active'");
+    for (const id of ids) statement.run(folderId, id, projectId);
   }
 
   listIcons(projectId, search = '') {

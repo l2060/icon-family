@@ -1,9 +1,17 @@
+FROM node:22-bookworm-slim AS build
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
 FROM node:22-bookworm-slim
 
 WORKDIR /app
 COPY package.json ./
 COPY server ./server
-COPY public ./public
+COPY --from=build /app/dist ./dist
 COPY scripts ./scripts
 COPY README.md ./
 

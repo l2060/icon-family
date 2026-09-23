@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
+import { validateStaticSvg } from './svg-safety.mjs';
 
 const DEFAULT_VIEWBOX = '0 0 1024 1024';
 const VIEWPORT_SIZE = 1024;
@@ -69,7 +70,7 @@ function cleanAttributeQuotes(svg) {
 
 export function sanitizeSvg(input, options = {}) {
   const colorMode = options.colorMode ?? 'preserve';
-  let svg = String(input ?? '').trim();
+  let svg = validateStaticSvg(input);
   if (!svg || !/<svg\b/i.test(svg)) throw new Error('未找到 SVG 根元素');
 
   svg = svg
@@ -89,7 +90,7 @@ export function sanitizeSvg(input, options = {}) {
 
   const rootMatch = svg.match(/<svg\b([^>]*)>/i);
   if (!rootMatch) throw new Error('SVG 根元素无效');
-  const rootAttrs = rootMatch[1] ?? '';
+  const rootAttrs = (rootMatch[1] ?? '').replace(/\/\s*$/, '');
   const viewBoxMatch = rootAttrs.match(/\bviewBox\s*=\s*["']([^"']+)["']/i);
   const widthMatch = rootAttrs.match(/\bwidth\s*=\s*["']([^"']+)["']/i);
   const heightMatch = rootAttrs.match(/\bheight\s*=\s*["']([^"']+)["']/i);
@@ -120,6 +121,7 @@ export function sanitizeSvg(input, options = {}) {
 
 export function iconFromSvg({ name, svg, sourceType = 'upload', sourceMeta = null, colorMode = 'preserve' }) {
   const clean = sanitizeSvg(svg, { colorMode });
+  if (!/<(?:path|rect|circle|ellipse|line|polyline|polygon|use)\b/.test(clean.body)) throw new Error('SVG 未包含可导入的图形');
   const normalized = normalizeToViewport(clean);
   const sourceName = String(name ?? 'icon').replace(/\.[^.]+$/, '');
   const slug = slugify(sourceName);
@@ -525,15 +527,19 @@ function findEndOfCentralDirectory(buffer) {
 
 export function parseZipEntries(input) {
   const buffer = Buffer.isBuffer(input) ? input : Buffer.from(input);
+  if (buffer.length > 20 * 1024 * 1024) throw new Error('ZIP 超过 20 MB');
   const eocd = findEndOfCentralDirectory(buffer);
   if (eocd < 0) throw new Error('不是有效的 ZIP 文件');
   const count = buffer.readUInt16LE(eocd + 10);
+  if (count > 2000) throw new Error('ZIP 文件数量超限');
   const centralOffset = buffer.readUInt32LE(eocd + 16);
   const entries = new Map();
+  let totalOutput = 0;
   let cursor = centralOffset;
   for (let i = 0; i < count; i += 1) {
     if (buffer.readUInt32LE(cursor) !== 0x02014b50) break;
     const flags = buffer.readUInt16LE(cursor + 8);
+    if (flags & 1) throw new Error('不支持加密 ZIP');
     const method = buffer.readUInt16LE(cursor + 10);
     const compressedSize = buffer.readUInt32LE(cursor + 20);
     const uncompressedSize = buffer.readUInt32LE(cursor + 24);
@@ -545,16 +551,20 @@ export function parseZipEntries(input) {
     const name = (flags & 0x800 ? nameBytes.toString('utf8') : nameBytes.toString('latin1')).replace(/\\/g, '/');
     cursor += 46 + nameLength + extraLength + commentLength;
     if (!name || name.endsWith('/')) continue;
-    if (uncompressedSize > 20 * 1024 * 1024) continue;
+    if (name.startsWith('/') || name.split('/').includes('..') || /^[a-z]:/i.test(name)) throw new Error('ZIP 路径无效');
+    if (uncompressedSize > 20 * 1024 * 1024) throw new Error('ZIP 文件解压大小超限');
     if (buffer.readUInt32LE(localOffset) !== 0x04034b50) continue;
     const localNameLength = buffer.readUInt16LE(localOffset + 26);
     const localExtraLength = buffer.readUInt16LE(localOffset + 28);
     const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+    if (dataStart + compressedSize > buffer.length) throw new Error('ZIP 数据不完整');
     const compressed = buffer.subarray(dataStart, dataStart + compressedSize);
     let content;
     if (method === 0) content = compressed;
-    else if (method === 8) content = zlib.inflateRawSync(compressed);
-    else continue;
+    else if (method === 8) content = zlib.inflateRawSync(compressed, { maxOutputLength: 20 * 1024 * 1024 });
+    else throw new Error('不支持的 ZIP 压缩方法');
+    totalOutput += content.length;
+    if (content.length !== uncompressedSize || totalOutput > 40 * 1024 * 1024 || entries.size >= 2000) throw new Error('ZIP 解压大小或文件数量超限');
     entries.set(name, content);
   }
   return entries;
@@ -607,15 +617,27 @@ export function parseIconfontZip(input) {
   if (!output.length) {
     const js = [...entries.entries()].find(([name]) => /\.js$/i.test(name));
     if (js) {
-      const text = js[1].toString('utf8');
-      const symbolMatches = [...text.matchAll(/<symbol\b([^>]*)>([\s\S]*?)<\/symbol\s*>/gi)];
-      for (const match of symbolMatches) {
-        const attrs = match[1] ?? '';
-        const id = extractAttribute(`<symbol ${attrs}>`, 'id') || `icon-${output.length + 1}`;
-        const viewBox = extractAttribute(`<symbol ${attrs}>`, 'viewBox') || DEFAULT_VIEWBOX;
-        output.push({ name: id.replace(/^icon[-_]/i, ''), unicode: null, svg: `<svg viewBox="${viewBox}">${match[2]}</svg>` });
-      }
+      output.push(...parseIconfontJs(js[1].toString('utf8')));
     }
   }
+  return output;
+}
+
+export function parseIconfontJs(input) {
+  if (typeof input !== 'string' || input.length > 20 * 1024 * 1024) throw new Error('JS 文件无效或超过 20 MB');
+  const output = [];
+  // Only read static string literals. No eval, Function, VM or DOM execution.
+  const literals = /"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|`(?:\\[\s\S]|[^`\\])*`/g;
+  for (const match of input.matchAll(literals)) {
+    const literal = match[0];
+    if (literal[0] === '`' && literal.includes('${')) continue;
+    const text = literal.slice(1, -1).replace(/\\(?:u([0-9a-f]{4})|x([0-9a-f]{2})|([\s\S]))/gi, (_, unicode, hex, char) => {
+      if (unicode || hex) return String.fromCharCode(parseInt(unicode || hex, 16));
+      return ({ n: '\n', r: '\r', t: '\t' })[char] ?? char;
+    });
+    if (/<symbol\b/i.test(text)) output.push(...extractGlyphsFromIconfontSvg(text));
+    if (output.length > 2000) throw new Error('单次导入最多 2000 个图标');
+  }
+  if (!output.length) throw new Error('未找到静态 SVG symbol，JS 文件不会被执行');
   return output;
 }

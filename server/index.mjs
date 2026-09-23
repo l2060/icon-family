@@ -7,6 +7,8 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Store } from './db.mjs';
 import { JsonStore } from './fs-store.mjs';
+import { createCartHandler } from './cart.mjs';
+import { manageFolders, moveFolderIcons } from './folders.mjs';
 import {
   hash,
   slugify,
@@ -20,10 +22,12 @@ import {
   transformSvg,
   generateIconfontJs,
   parseIconfontZip,
+  parseIconfontJs,
+  extractGlyphsFromIconfontSvg,
 } from './core.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PUBLIC_DIR = path.join(ROOT, 'public');
+const PUBLIC_DIR = path.join(ROOT, 'dist');
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(ROOT, 'data'));
 const PROJECTS_DIR = path.join(DATA_DIR, 'projects');
 const ARTIFACTS_DIR = path.join(DATA_DIR, 'artifacts');
@@ -173,7 +177,7 @@ function canAccessProject(context, project, write = false) {
   if (!context.user && !context.token) return false;
   if (context.user?.role === 'admin') return true;
   if (context.token) return Number(context.token.project_id) === Number(project.id) && (!write || context.token.scopes.includes('build:write'));
-  return Number(context.user.id) === Number(project.owner_id);
+  return Number(context.user.id) === Number(project.owner_id) || project.settings?.everyoneCanEdit === true || (project.settings?.collaboratorIds || []).includes(Number(context.user.id));
 }
 
 function projectDirectory(projectId) {
@@ -383,6 +387,7 @@ async function resolveRemoteSvg(item) {
 }
 
 async function importItems(project, items, sourceType = 'upload') {
+  if (!Array.isArray(items) || !items.length || items.length > 2000) throw Object.assign(new Error('单次导入需包含 1–2000 个图标'), { statusCode: 400 });
   const list = Array.isArray(items) ? items : [];
   const job = store.createImportJob(project.id, list.length);
   const report = [];
@@ -569,9 +574,13 @@ async function requireProject(req, res, projectId, write = false) {
   return { context, project };
 }
 
+const handleCart = createCartHandler({ store, requireUser, readBody, json, errorResponse, resolveRemoteSvg, importItems, canAccessProject });
+
 async function handleApi(req, res, urlObject) {
   const parts = parsePath(urlObject.pathname);
   const method = req.method || 'GET';
+
+  if (parts[0] === 'cart') return handleCart(req, res, parts, method);
 
   if (parts[0] === 'health') return json(res, 200, { ok: true, service: 'iconfamily', time: new Date().toISOString() });
 
@@ -594,6 +603,16 @@ async function handleApi(req, res, urlObject) {
     return user ? json(res, 200, { user }) : errorResponse(res, 401, '未登录');
   }
 
+  if (parts[0] === 'auth' && parts[1] === 'password' && parts.length === 2 && method === 'POST') {
+    const user = requireUser(req, res);
+    if (!user) return;
+    const body = await readBody(req);
+    if (typeof body.password !== 'string' || body.password.length < 6 || body.password.length > 128) return errorResponse(res, 400, '密码需为 6–128 位');
+    if (typeof body.currentPassword !== 'string' || !store.changePassword(user.id, body.password, body.currentPassword)) return errorResponse(res, 400, '当前密码错误');
+    setSessionCookie(res, store.createSession(user.id).token);
+    return json(res, 200, { ok: true });
+  }
+
   if (parts[0] === 'iconfont' && parts[1] === 'search' && method === 'POST') {
     if (!requireUser(req, res)) return;
     const body = await readBody(req);
@@ -604,12 +623,20 @@ async function handleApi(req, res, urlObject) {
     const user = requireUser(req, res);
     if (!user) return;
     if (user.role !== 'admin') return errorResponse(res, 403, '只有管理员可以管理用户');
+    if (method === 'POST' && parts.length === 3 && parts[2] === 'password') {
+      const id = Number(parts[1]);
+      if (id === user.id) return errorResponse(res, 400, '请通过我的账号修改自己的密码');
+      const body = await readBody(req);
+      if (typeof body.password !== 'string' || body.password.length < 6 || body.password.length > 128) return errorResponse(res, 400, '密码需为 6–128 位');
+      if (!Number.isSafeInteger(id) || !store.changePassword(id, body.password)) return errorResponse(res, 404, '用户不存在');
+      return json(res, 200, { ok: true });
+    }
     if (method === 'GET' && parts.length === 1) return json(res, 200, { users: store.listUsers() });
     if (method === 'POST' && parts.length === 1) {
       const body = await readBody(req);
       const username = String(body.username ?? '').trim();
       const password = String(body.password ?? '');
-      if (!/^[\w.@-]{2,80}$/.test(username) || password.length < 6) return errorResponse(res, 400, '用户名或密码不符合要求');
+      if (!/^[\w.@-]{2,80}$/.test(username) || password.length < 6 || password.length > 128) return errorResponse(res, 400, '用户名或密码不符合要求');
       try { return json(res, 201, { user: store.createUser({ username, password, role: body.role }) }); } catch (error) { return errorResponse(res, 409, '用户名已存在'); }
     }
     if (method === 'DELETE' && parts.length === 2) {
@@ -626,9 +653,16 @@ async function handleApi(req, res, urlObject) {
       const body = await readBody(req);
       const name = String(body.name ?? '').trim();
       if (!name) return errorResponse(res, 400, '项目名称不能为空');
+      if (body.everyoneCanEdit !== undefined && typeof body.everyoneCanEdit !== 'boolean') return errorResponse(res, 400, '协作用户无效');
+      if (body.collaboratorIds !== undefined && (!Array.isArray(body.collaboratorIds) || body.collaboratorIds.some(id => !Number.isSafeInteger(id) || store.userById(id)?.status !== 'active'))) return errorResponse(res, 400, '协作用户无效');
+      if (user.role !== 'admin' && (body.everyoneCanEdit || body.collaboratorIds?.length)) return errorResponse(res, 403, '仅管理员可分配协作权限');
+      const collaboration = { everyoneCanEdit: body.everyoneCanEdit === true, collaboratorIds: [...new Set(body.collaboratorIds || [])] };
+      if (body.themeColor !== undefined && (typeof body.themeColor !== 'string' || !/^#[0-9a-f]{6}$/i.test(body.themeColor))) return errorResponse(res, 400, '项目主题色无效');
+      if (body.jsFilename && typeof body.jsFilename === 'string' && !/\.js$/i.test(body.jsFilename)) body.jsFilename += '.js';
+      if (body.jsFilename && (typeof body.jsFilename !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}\.js$/i.test(body.jsFilename))) return errorResponse(res, 400, 'JS 文件名无效');
       const requestedMargin = Number(body.margin);
       const margin = Number.isFinite(requestedMargin) ? Math.min(512, Math.max(0, requestedMargin)) : DEFAULT_PROJECT_MARGIN;
-      const project = store.createProject({ name, prefix: normalizePrefix(body.prefix || name), description: String(body.description ?? ''), ownerId: user.id, settings: { codepointStart: Number(body.codepointStart) || 0xe900, emSize: Number(body.emSize) || 1024, margin, defaultColorMode: body.defaultColorMode || 'preserve' } });
+      const project = store.createProject({ name, prefix: normalizePrefix(body.prefix || name), description: String(body.description ?? ''), ownerId: user.id, settings: { ...collaboration, themeColor: body.themeColor || '#1677ff', jsFilename: body.jsFilename || '', codepointStart: Number(body.codepointStart) || 0xe900, emSize: Number(body.emSize) || 1024, margin, defaultColorMode: body.defaultColorMode || 'preserve' } });
       await fsp.mkdir(projectDirectory(project.id), { recursive: true });
       return json(res, 201, { project: projectPayload(project) });
     }
@@ -638,7 +672,7 @@ async function handleApi(req, res, urlObject) {
   // token checks: the generated sprite is the project's publishable asset.
   // A build is reused only when its source revision still matches the project;
   // otherwise the current project is built before the file is returned.
-  if (parts[0] === 'projects' && parts[1] && parts[2] === 'iconfont.js' && parts.length === 3 && method === 'GET') {
+  if (parts[0] === 'projects' && parts[1] && parts[2] === 'javascript' && parts.length === 3 && method === 'GET') {
     const projectId = Number(parts[1]);
     try {
       const latest = await ensureLatestPublicBuild(projectId);
@@ -653,6 +687,7 @@ async function handleApi(req, res, urlObject) {
         return res.end();
       }
       return text(res, 200, content, 'application/javascript; charset=utf-8', {
+        'Content-Disposition': `attachment; filename="${store.projectById(projectId).settings.jsFilename || 'iconfont.js'}"`,
         ...(etag ? { ETag: etag } : {}),
         'Cache-Control': 'no-cache, must-revalidate',
         'Access-Control-Allow-Origin': '*',
@@ -673,12 +708,29 @@ async function handleApi(req, res, urlObject) {
     if (!action && method === 'GET') {
       await repairLegacyIconfontIcons(project);
       const refreshedProject = store.projectById(projectId) || project;
-      return json(res, 200, { project: projectPayload(refreshedProject), icons: store.listIcons(projectId, urlObject.searchParams.get('search') || '') });
+      const icons = store.listIcons(projectId, urlObject.searchParams.get('search') || '');
+      const visibleIcons = urlObject.searchParams.get('view') === 'workspace'
+        ? icons.map(({ id, name, slug, svg, codepoint, color_mode, revision, created_at, folder_id }) => ({ id, name, slug, svg, codepoint, color_mode, revision, created_at, folder_id: folder_id ?? null }))
+        : icons;
+      return json(res, 200, { project: projectPayload(refreshedProject), icons: visibleIcons });
     }
     if (!action && method === 'PATCH') {
       if (!context.user) return errorResponse(res, 403, 'API Token 不能修改项目');
+      if (context.user.role !== 'admin' && Number(project.owner_id) !== context.user.id) return errorResponse(res, 403, '仅管理员或创建者可以修改项目设置');
       const body = await readBody(req);
       const nextSettings = { ...(project.settings || {}), ...(body.settings && typeof body.settings === 'object' ? body.settings : {}) };
+      nextSettings.folders = store.projectById(projectId).settings.folders || [];
+      if (nextSettings.themeColor !== undefined && (typeof nextSettings.themeColor !== 'string' || !/^#[0-9a-f]{6}$/i.test(nextSettings.themeColor))) return errorResponse(res, 400, '项目主题色无效');
+      if (nextSettings.jsFilename && typeof nextSettings.jsFilename === 'string' && !/\.js$/i.test(nextSettings.jsFilename)) nextSettings.jsFilename += '.js';
+      if (nextSettings.jsFilename && (typeof nextSettings.jsFilename !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}\.js$/i.test(nextSettings.jsFilename))) return errorResponse(res, 400, 'JS 文件名无效');
+      if (context.user.role !== 'admin') {
+        nextSettings.everyoneCanEdit = project.settings?.everyoneCanEdit === true;
+        nextSettings.collaboratorIds = project.settings?.collaboratorIds || [];
+      } else if (nextSettings.collaboratorIds !== undefined) {
+        if (!Array.isArray(nextSettings.collaboratorIds) || nextSettings.collaboratorIds.some((id) => !Number.isSafeInteger(id) || store.userById(id)?.status !== 'active')) return errorResponse(res, 400, '协作用户无效');
+        nextSettings.collaboratorIds = [...new Set(nextSettings.collaboratorIds)];
+      }
+      if (nextSettings.everyoneCanEdit !== undefined && typeof nextSettings.everyoneCanEdit !== 'boolean') return errorResponse(res, 400, '协作用户无效');
       if (body.margin !== undefined) nextSettings.margin = body.margin;
       if (nextSettings.margin !== undefined) {
         const margin = Number(nextSettings.margin);
@@ -690,6 +742,7 @@ async function handleApi(req, res, urlObject) {
     }
     if (!action && method === 'DELETE') {
       if (!context.user) return errorResponse(res, 403, 'API Token 不能删除项目');
+      if (context.user.role !== 'admin' && Number(project.owner_id) !== context.user.id) return errorResponse(res, 403, '仅管理员或创建者可以删除项目');
       const directory = projectDirectory(projectId);
       store.deleteProject(projectId);
       await fsp.rm(directory, { recursive: true, force: true });
@@ -697,6 +750,19 @@ async function handleApi(req, res, urlObject) {
       return json(res, 200, { ok: true });
     }
 
+    if (action === 'folders' && ['POST', 'PATCH', 'DELETE'].includes(method)) {
+      if (!context.user) return errorResponse(res, 403, 'API Token 不能管理目录');
+      if ((method === 'POST' && parts.length !== 3) || (method !== 'POST' && parts.length !== 4)) return errorResponse(res, 400, '目录操作无效');
+      const body = method === 'DELETE' ? {} : await readBody(req);
+      try { return json(res, method === 'POST' ? 201 : 200, manageFolders(store, projectId, method, parts[3], body)); }
+      catch (error) { return errorResponse(res, error.status || 400, error.message); }
+    }
+    if (action === 'icons' && parts[3] === 'move' && method === 'POST') {
+      if (!context.user) return errorResponse(res, 403, 'API Token 不能移动图标');
+      const body = await readBody(req);
+      try { return json(res, 200, moveFolderIcons(store, projectId, body)); }
+      catch (error) { return errorResponse(res, error.status || 400, error.message); }
+    }
     if (action === 'icons' && !parts[3] && method === 'GET') {
       await repairLegacyIconfontIcons(project);
       return json(res, 200, { icons: store.listIcons(projectId, urlObject.searchParams.get('search') || '') });
@@ -707,6 +773,35 @@ async function handleApi(req, res, urlObject) {
       const body = await readBody(req);
       const result = await importItems(project, body.items || [], 'upload');
       return json(res, 200, { job: result });
+    }
+
+    if (action === 'icons' && parts[3] === 'import-preview' && method === 'POST') {
+      if (!context.user) return errorResponse(res, 403, 'API Token 不能导入图标');
+      const body = await readBody(req);
+      try {
+        const fileName = String(body.fileName || '');
+        let items;
+        if (/\.zip$/i.test(fileName)) items = parseIconfontZip(Buffer.from(String(body.data || ''), 'base64'));
+        else if (/\.js$/i.test(fileName)) items = parseIconfontJs(body.text);
+        else if (/\.svg$/i.test(fileName)) {
+          const glyphs = extractGlyphsFromIconfontSvg(body.text);
+          items = glyphs.length ? glyphs : [{ name: fileName.replace(/\.svg$/i, ''), svg: body.text }];
+        } else throw new Error('仅支持 SVG、JS 和 ZIP 文件');
+        if (!items.length || items.length > 2000) throw new Error('单次导入需包含 1–2000 个图标');
+        const valid = [], rejected = [];
+        for (const item of items) {
+          try { valid.push({ name: String(item.name).slice(0, 200), svg: iconFromSvg({ name: item.name, svg: item.svg }).svg }); }
+          catch (error) { rejected.push({ name: String(item.name).slice(0, 200), reason: error.message }); }
+        }
+        return json(res, 200, { items: valid, rejected });
+      } catch (error) { return errorResponse(res, 400, error.message); }
+    }
+
+    if (action === 'icons' && parts[3] === 'import-js' && method === 'POST') {
+      if (!context.user) return errorResponse(res, 403, 'API Token 不能导入图标');
+      const body = await readBody(req);
+      try { return json(res, 200, { job: await importItems(project, parseIconfontJs(body.text), 'upload') }); }
+      catch (error) { return errorResponse(res, 400, error.message); }
     }
 
     if (action === 'icons' && parts[3] === 'import-zip' && method === 'POST') {
@@ -746,9 +841,9 @@ async function handleApi(req, res, urlObject) {
         const occupiedSlugs = operation.type === 'stripPrefix'
           ? new Set(store.listIcons(projectId).map((icon) => String(icon.slug)))
           : null;
-        if (operation.type === 'fitMargin' || operation.type === 'margin') {
+        if ((operation.type === 'fitMargin' || operation.type === 'margin') && context.user && (context.user.role === 'admin' || Number(project.owner_id) === context.user.id)) {
           const margin = Math.min(512, Math.max(0, requestedMargin));
-          store.updateProject(projectId, { settings: { ...(project.settings || {}), margin } });
+          store.updateProject(projectId, { settings: { ...(store.projectById(projectId).settings || {}), margin } });
         }
         for (const id of ids) {
           const icon = store.iconById(id);
@@ -792,6 +887,33 @@ async function handleApi(req, res, urlObject) {
       });
       for (const icon of changed.filter(Boolean)) await saveIconAssets(icon);
       return json(res, 200, { icons: store.listIcons(projectId), changed: changedCount });
+    }
+
+    if (action === 'icons' && parts[3] && parts[4] === 'clone' && parts.length === 5 && method === 'POST') {
+      if (!context.user) return errorResponse(res, 403, 'API Token 不能修改图标');
+      const original = store.iconById(Number(parts[3]));
+      if (!original || Number(original.project_id) !== projectId || original.status !== 'active') return errorResponse(res, 404, '图标不存在');
+      const body = await readBody(req);
+      const targetId = body.targetProjectId ?? projectId;
+      if (!Number.isSafeInteger(targetId)) return errorResponse(res, 400, '目标项目无效');
+      const target = store.projectById(targetId);
+      if (!target || !canAccessProject(context, target, true)) return errorResponse(res, 403, '无权访问目标项目');
+      const folderId = body.folderId ?? null;
+      if (folderId !== null && !(target.settings.folders || []).some(folder => folder.id === folderId)) return errorResponse(res, 404, '目标目录不存在');
+      let slug = `${original.slug}-copy`;
+      let suffix = 2;
+      while (store.iconBySlug(targetId, slug)) slug = `${original.slug}-copy-${suffix++}`;
+      let cloned;
+      store.transaction(() => {
+      cloned = store.createIcon({ projectId: targetId, name: String(body.name || `${original.name} copy`).slice(0, 200), slug,
+        svg: original.svg, viewBox: original.view_box, colorMode: original.color_mode,
+        sourceType: 'clone', sourceHash: hash(original.svg), sourceMeta: { clonedFrom: original.id },
+        codepoint: store.nextCodepoint(targetId, target.settings?.codepointStart ?? 0xe900) });
+      store.moveIcons(targetId, [cloned.id], folderId);
+      cloned = store.iconById(cloned.id);
+      });
+      await saveIconAssets(cloned);
+      return json(res, 201, { icon: cloned });
     }
 
     if (action === 'icons' && parts[3] && method === 'PATCH') {
@@ -842,9 +964,7 @@ async function handleApi(req, res, urlObject) {
       return job ? json(res, 200, { job }) : errorResponse(res, 404, '导入任务不存在');
     }
     if (action === 'tokens' && method === 'POST') {
-      if (!context.user) return errorResponse(res, 403, 'API Token 不能创建 Token');
-      const body = await readBody(req);
-      return json(res, 201, { token: store.createApiToken(projectId, String(body.name || 'build token')) });
+      return errorResponse(res, 410, 'API Token 创建功能已停用');
     }
   }
 
