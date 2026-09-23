@@ -106,17 +106,18 @@ button { cursor: pointer; }
 .modal-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
 .modal-header h3 { margin: 0; }
 .modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
-.drawer { position: fixed; z-index: 22; top: 0; right: 0; bottom: 0; width: min(760px, 100%); overflow: auto; padding: 22px; background: #fff; box-shadow: -8px 0 24px rgba(0,0,0,.16); }
+.drawer { position: fixed; z-index: 22; top: 0; right: 0; bottom: 0; display: flex; flex-direction: column; width: min(760px, 100%); overflow: hidden; padding: 22px; background: #fff; box-shadow: -8px 0 24px rgba(0,0,0,.16); }
+.drawer > * { flex-shrink: 0; }
 .drawer.narrow { width: min(440px, 100%); }
 .drawer-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
 .drawer-header h3 { margin: 0; font-size: 18px; }
 .close-button { border: 0; background: transparent; color: var(--muted); font-size: 22px; line-height: 1; }
 .remote-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
 .remote-toolbar .ant-input { flex: 1; }
-.remote-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; }
+.remote-grid { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; display: grid; align-content: start; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; padding: 2px; }
 .remote-card { position: relative; padding: 10px; border: 1px solid var(--border); border-radius: 7px; background: #fff; cursor: pointer; }
 .remote-card.selected { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(22,119,255,.12); }
-.remote-card .icon-preview { height: 76px; margin: 0 0 8px; }
+.remote-card .icon-preview { height: 110px; margin: 0 0 8px; }
 .remote-card .icon-preview svg { width: 46px; height: 46px; }
 .remote-card input { position: absolute; top: 8px; right: 8px; accent-color: var(--primary); }
 .remote-card-name { font-size: 12px; font-weight: 550; }

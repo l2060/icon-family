@@ -262,7 +262,7 @@ export class Store {
     return this.db.prepare(`
       SELECT * FROM icons
       WHERE project_id=? AND status='active' AND (?='' OR name LIKE ? OR slug LIKE ?)
-      ORDER BY sort_order ASC, id ASC
+      ORDER BY created_at DESC, id DESC
     `).all(projectId, search, pattern, pattern).map(iconRow);
   }
 

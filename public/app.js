@@ -200,7 +200,7 @@ function renderSidebar() {
   }
   list.innerHTML = projects.map((project) => `
     <div class="project-item ${Number(project.id) === Number(state.activeProjectId) ? 'active' : ''}" data-project-id="${project.id}">
-      <span class="project-dot"></span><span class="project-meta"><span class="project-name ellipsis">${esc(project.name)}</span><span class="project-sub">${esc(project.prefix)} · ${project.icon_count || 0} 个图标</span></span>
+      <span class="project-dot"></span><span class="project-meta"><span class="project-name ellipsis">${esc(project.name)}</span><span class="project-sub"> · ${project.icon_count || 0} 个图标</span></span>
       <button class="project-more" data-project-more="${project.id}" title="项目操作">⋯</button>
     </div>`).join('');
   list.querySelectorAll('[data-project-id]').forEach((node) => node.addEventListener('click', (event) => {
@@ -409,8 +409,8 @@ async function toBase64(arrayBuffer) {
 }
 
 function showImportReport(job) {
-  const node = overlay(`<div class="modal wide"><div class="modal-header"><h3>导入结果</h3><button class="close-button" data-close>×</button></div><div class="notice ${job.failed ? 'error' : 'success'}">成功 ${job.succeeded}，跳过 ${job.skipped}，失败 ${job.failed}</div><div class="report-list">${(job.report || []).map((row) => `<div class="report-row"><span>${esc(row.name || '')}</span><span class="${row.status === 'failed' ? 'danger-text' : ''}">${esc(row.status)}${row.reason ? `：${esc(row.reason)}` : ''}</span></div>`).join('')}</div><div class="modal-footer"><button class="ant-btn ant-btn-primary" data-close>完成</button></div></div>`);
-  node.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', () => closeOverlay(node)));
+  const node = overlay(`<div class="modal"><div class="modal-header"><h3>导入结果</h3><button class="close-button" aria-label="关闭">×</button></div><div class="notice ${job.failed ? 'error' : 'success'}">成功 ${job.succeeded}，跳过 ${job.skipped}，失败 ${job.failed}</div><div class="muted">点击任意位置关闭</div></div>`);
+  node.addEventListener('click', () => closeOverlay(node));
 }
 
 function openIconfontDrawer() {
@@ -440,6 +440,7 @@ async function performRemoteSearch(node, page = 1) {
     state.remoteTotal = result.total || state.remoteResults.length;
     state.remotePage = page;
     renderRemoteResults(node);
+    resultBox.scrollTop = 0;
   } catch (error) {
     notice.textContent = error.message;
     notice.classList.remove('hidden');
@@ -462,7 +463,10 @@ function renderRemoteResults(node) {
   else resultBox.innerHTML = state.remoteResults.map((item) => `<div class="remote-card ${state.remoteSelected.has(item.remoteId) ? 'selected' : ''}" data-remote-id="${esc(item.remoteId)}"><input type="checkbox" ${state.remoteSelected.has(item.remoteId) ? 'checked' : ''}><div class="icon-preview" data-remote-preview="${esc(item.remoteId)}"></div><div class="remote-card-name ellipsis" title="${esc(item.name)}">${esc(item.name)}</div><div class="remote-card-meta ellipsis">${esc(item.fontClass || item.unicode || item.remoteId)}</div></div>`).join('');
   resultBox.querySelectorAll('[data-remote-preview]').forEach((preview) => {
     const item = state.remoteResults.find((candidate) => String(candidate.remoteId) === String(preview.dataset.remotePreview));
-    if (item) preview.innerHTML = remotePreview(item);
+    if (item) {
+      preview.innerHTML = remotePreview(item);
+      preview.querySelector('svg')?.removeAttribute('style');
+    }
   });
   resultBox.querySelectorAll('[data-remote-id]').forEach((card) => card.addEventListener('click', () => {
     const id = card.dataset.remoteId;

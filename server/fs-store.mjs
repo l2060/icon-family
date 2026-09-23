@@ -172,7 +172,7 @@ export class JsonStore {
 
   listIcons(projectId, search = '') {
     const needle = String(search).toLowerCase();
-    return this.state.icons.filter((icon) => Number(icon.project_id) === Number(projectId) && icon.status === 'active' && (!needle || `${icon.name} ${icon.slug}`.toLowerCase().includes(needle))).sort((a, b) => Number(a.sort_order) - Number(b.sort_order) || Number(a.id) - Number(b.id)).map(iconView);
+    return this.state.icons.filter((icon) => Number(icon.project_id) === Number(projectId) && icon.status === 'active' && (!needle || `${icon.name} ${icon.slug}`.toLowerCase().includes(needle))).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)) || Number(b.id) - Number(a.id)).map(iconView);
   }
 
   iconById(id) { return iconView(this.state.icons.find((icon) => Number(icon.id) === Number(id))); }
