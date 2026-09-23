@@ -162,13 +162,77 @@ npm run package
 
 ### Docker 部署
 
+#### 使用官方镜像（推荐）
+
+Docker Hub：[vblegend2030/icon-family](https://hub.docker.com/r/vblegend2030/icon-family)。直接拉取镜像即可部署，无需下载源码或在宿主机安装 Node.js。
+
+```sh
+docker pull vblegend2030/icon-family:latest
+docker run -d \
+  --name icon-family \
+  --restart unless-stopped \
+  -p 3000:3000 \
+  -v iconfamily-data:/data \
+  -e ADMIN_USER=admin \
+  -e ADMIN_PASSWORD='替换为你的强密码' \
+  vblegend2030/icon-family:latest
+```
+
+访问 `http://localhost:3000`，使用 `admin` 和设置的密码登录。以上为 Bash / sh 多行命令；Windows PowerShell 可合并为一行执行。管理员账号密码仅用于首次初始化，不会覆盖已有账号。
+
+也可以在独立部署目录创建以下 `docker-compose.yml`，通过 Compose 管理官方镜像：
+
+```yaml
+services:
+  icon-family:
+    image: vblegend2030/icon-family:latest
+    container_name: icon-family
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATA_DIR: /data
+      ADMIN_USER: admin
+      ADMIN_PASSWORD: "替换为你的强密码"
+    volumes:
+      - iconfamily-data:/data
+
+volumes:
+  iconfamily-data:
+    name: iconfamily-data
+```
+
+```sh
+# 首次启动
+docker compose up -d
+
+# 更新镜像并重新创建服务容器
+docker compose pull
+docker compose up -d
+```
+
+两种启动方式任选其一，避免同名容器或端口冲突。数据持久化在 `iconfamily-data` 卷中，更新时保留该卷，不要执行 `docker compose down -v`。如果已有部署，请沿用原数据卷名称；仓库自带的 Compose 默认会为卷名添加部署项目名前缀。
+
+示例使用 `latest`；需要固定版本时，请从 Docker Hub 的 Tags 页面选择已发布的标签。镜像更新不会自动替换正在运行的容器，使用 `docker run` 部署时需拉取新镜像后重建容器，并挂载原数据卷。
+
+#### 从源码构建镜像
+
+仓库自带的 `docker-compose.yml` 使用本地源码构建，适用于自行修改代码后部署。
+
+当前 Dockerfile 直接复制本地 `dist/`，因此需先在项目根目录编译前端：
+
+```sh
+npm ci
+npm run build
+```
+
 先在 `docker-compose.yml` 中修改 `ADMIN_PASSWORD`，再运行：
 
 ```sh
 docker compose up -d --build
 ```
 
-访问 `http://localhost:3000`。前端在镜像构建阶段编译，运行阶段仅保留服务所需文件；数据保存在 `iconfamily-data` 卷中。当前 Compose 的环境变量为显式配置，仅修改宿主机 `.env` 不会覆盖其中的密码。
+访问 `http://localhost:3000`。镜像包含预先编译的前端与 Node 后端，数据保存在命名卷中。当前 Compose 的环境变量为显式配置，仅修改宿主机 `.env` 不会覆盖其中的密码。
 
 ## 配置与数据
 
