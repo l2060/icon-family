@@ -9,6 +9,7 @@ import { Store } from './db.mjs';
 import { JsonStore } from './fs-store.mjs';
 import { createCartHandler } from './cart.mjs';
 import { manageFolders, moveFolderIcons } from './folders.mjs';
+import { pruneBuildHistory } from './build-retention.mjs';
 import {
   hash,
   slugify,
@@ -500,7 +501,21 @@ async function repairLegacyIconfontIcons(project) {
   try { await job; } finally { legacyRepairJobs.delete(projectId); }
 }
 
+const projectBuildJobs = new Map();
 async function buildProject(projectId) {
+  const id = Number(projectId);
+  if (projectBuildJobs.has(id)) return projectBuildJobs.get(id);
+  const job = runProjectBuild(id);
+  projectBuildJobs.set(id, job);
+  try { return await job; } finally { projectBuildJobs.delete(id); }
+}
+
+function cleanBuildHistory(projectId) {
+  try { pruneBuildHistory(store, ARTIFACTS_DIR, projectId); }
+  catch (error) { console.error(`Build history cleanup failed for project ${projectId}:`, error); }
+}
+
+async function runProjectBuild(projectId) {
   const project = store.projectById(projectId);
   if (!project) throw new Error('项目不存在');
   const icons = store.listIcons(projectId);
@@ -520,6 +535,8 @@ async function buildProject(projectId) {
     return finished;
   } catch (error) {
     return store.finishBuild(build.id, { status: 'failed', errorMessage: error.message });
+  } finally {
+    cleanBuildHistory(projectId);
   }
 }
 
@@ -1008,6 +1025,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+for (const project of store.listProjects({ role: 'admin' })) cleanBuildHistory(project.id);
 server.listen(PORT, HOST, () => console.log(`IconFamily running at http://localhost:${PORT}`));
 
 process.on('SIGINT', () => { store.close(); server.close(() => process.exit(0)); });

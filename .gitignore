@@ -1,5 +1,6 @@
 data/
 release/
+iconfamily-*.zip
 *.log
 .env
 node_modules/

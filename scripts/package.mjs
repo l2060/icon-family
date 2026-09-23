@@ -101,10 +101,10 @@ async function packageRelease() {
   await fs.mkdir(release, { recursive: true });
   await fs.cp(path.join(root, 'server'), path.join(release, 'server'), { recursive: true });
   await fs.cp(path.join(root, 'dist'), path.join(release, 'dist'), { recursive: true, filter: (source) => !source.endsWith('.map') });
-  await fs.cp(path.join(root, 'scripts'), path.join(release, 'scripts'), { recursive: true });
   const manifest = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
   await fs.writeFile(path.join(release, 'package.json'), JSON.stringify({ name: manifest.name, version: manifest.version, private: true, type: 'module', engines: manifest.engines, scripts: { start: 'node --use-system-ca server/index.mjs' } }, null, 2));
   await fs.copyFile(path.join(root, 'README.md'), path.join(release, 'README.md'));
+  await fs.cp(path.join(root, 'docs'), path.join(release, 'docs'), { recursive: true });
   if (await exists(path.join(root, '.env.example'))) await fs.copyFile(path.join(root, '.env.example'), path.join(release, '.env.example'));
   await fs.writeFile(path.join(release, 'start.cmd'), '@echo off\r\nset PORT=3000\r\nnode --use-system-ca server\\index.mjs\r\n', 'utf8');
   await fs.writeFile(path.join(release, 'start.sh'), '#!/usr/bin/env sh\nPORT=${PORT:-3000} node --use-system-ca server/index.mjs\n', 'utf8');

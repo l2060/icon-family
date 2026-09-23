@@ -269,7 +269,8 @@ export class JsonStore {
     this.save(); return { ...build };
   }
 
-  listBuilds(projectId) { return this.state.builds.filter((build) => Number(build.project_id) === Number(projectId)).sort((a, b) => b.id - a.id).slice(0, 20).map((build) => ({ ...build })); }
+  listBuilds(projectId, limit = 20) { return this.state.builds.filter((build) => Number(build.project_id) === Number(projectId)).sort((a, b) => b.id - a.id).slice(0, limit ?? undefined).map((build) => ({ ...build })); }
+  deleteBuild(projectId, id) { this.state.builds = this.state.builds.filter((build) => !(Number(build.project_id) === Number(projectId) && Number(build.id) === Number(id))); this.save(); }
   latestBuild(projectId) { const project = this.state.projects.find((candidate) => Number(candidate.id) === Number(projectId)); return project?.latest_build_id ? { ...this.state.builds.find((build) => Number(build.id) === Number(project.latest_build_id)) } : null; }
   publishBuild(projectId, buildId) { const project = this.state.projects.find((candidate) => Number(candidate.id) === Number(projectId)); if (project) { project.latest_build_id = buildId; project.updated_at = timestamp(); this.save(); } }
 

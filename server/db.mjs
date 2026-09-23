@@ -382,7 +382,8 @@ export class Store {
     return buildRow(this.db.prepare('SELECT * FROM builds WHERE id=?').get(id));
   }
 
-  listBuilds(projectId) { return this.db.prepare('SELECT * FROM builds WHERE project_id=? ORDER BY id DESC LIMIT 20').all(projectId).map(buildRow); }
+  listBuilds(projectId, limit = 20) { return this.db.prepare('SELECT * FROM builds WHERE project_id=? ORDER BY id DESC LIMIT ?').all(projectId, limit ?? -1).map(buildRow); }
+  deleteBuild(projectId, id) { this.db.prepare('DELETE FROM builds WHERE project_id=? AND id=?').run(projectId, id); }
 
   latestBuild(projectId) {
     const project = this.projectById(projectId);

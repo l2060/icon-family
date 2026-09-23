@@ -12,8 +12,8 @@ WORKDIR /app
 COPY package.json ./
 COPY server ./server
 COPY --from=build /app/dist ./dist
-COPY scripts ./scripts
 COPY README.md ./
+COPY docs ./docs
 
 ENV NODE_ENV=production
 ENV PORT=3000
