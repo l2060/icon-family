@@ -34,7 +34,7 @@
 - 支持单个或批量移动图标；“拷贝到…”可选择目标项目及目录，默认当前项目和目录。
 - 删除目录会连同子目录及其中图标一起删除，操作前显示影响数量并确认。
 - 目录仅用于整理，不改变整个项目的 JS 导出范围，也不单独设置权限。
-- 可设置项目主题色、图标代码前缀、默认边距和 JS 文件名。文件名输入 `abc` 自动补为 `abc.js`，不会额外拼接项目名前缀。
+- 可设置项目主题色、图标代码前缀、默认边距和导出文件名。文件名输入 `abc`，按格式下载为 `abc.js` 或 `abc.ttf`，不会额外拼接项目名前缀。
 
 ![项目工作区：统一目录树、根目录与全部图标切换](docs/screenshots/workspace.png)
 
@@ -75,11 +75,37 @@
 2. **一键下载最新 JS**：点击项目标题区的“下载 iconfont.js”，将最新文件保存到本地，方便放进业务代码仓库或自行发布到 CDN。
 3. **复制 URL 直接接入**：点击“复制 URL”获取项目固定地址，业务页面可通过 script 标签加载。仍保留“生成 iconfont.js”按钮，支持提前手动构建。
 
-下载文件名由项目设置决定：填写 `abc` 或 `abc.js`，下载名称都是 `abc.js`；不附加项目名前缀，留空则使用 `iconfont.js`。
+下载文件名由项目设置的“导出文件名”决定：填写 `abc`、`abc.js` 或 `abc.ttf`，JavaScript 下载为 `abc.js`，TrueType Font 下载为 `abc.ttf`；不附加项目名前缀，留空则使用 `iconfont.js` / `iconfont.ttf`。已有 JS 文件名设置自动沿用为两种格式共用的名称。
 
 “自动最新”发生在下一次请求资源时，不会主动替换已经打开的业务页面中的图标；重新加载资源后才会使用更新内容。下载到本地或自行上传 CDN 的副本，也需要重新下载、发布。
 
-生成的 `iconfont.js` 使用 **SVG Symbol Sprite**，图标 ID 通常为 `项目代码前缀-图标代码后缀`。当前提供 JS、SVG 和 PNG 输出，尚未实现 TTF、WOFF、WOFF2 字体构建。
+生成的 `iconfont.js` 使用 **SVG Symbol Sprite**，图标 ID 通常为 `项目代码前缀-图标代码后缀`。项目字体输出支持 **JS / TTF** 两种格式，单个图标仍可导出 SVG 和 PNG。
+
+在项目工具栏选择 **JavaScript** 或 **TrueType Font**，即可生成、下载或复制对应的固定 URL。图标卡片的复制按钮也会同步切换：JavaScript 模式复制图标代码，TrueType Font 模式复制十六进制 Unicode（例如 `0xE900`）。TTF 接口同样会在项目更新后按需重新生成，缺失或损坏的 TTF 缓存会自动恢复：
+
+```text
+GET /api/projects/{projectId}/ttf
+POST /api/projects/{projectId}/ttf
+```
+
+`GET` 无需登录，返回 `font/ttf` 文件，支持 ETag / 304 和跨域访问；`POST` 需要项目写权限，提前生成最新字体并返回 `{ checksum, url }`。TTF 独立缓存，不会影响原有 JS 构建和下载。TTF 只保留最新文件。
+
+每个图标在创建时自动分配 Unicode 编码，在图标编辑器的 **Unicode** 选项中查看或修改（例如 `U+E900`）。编码在同一项目内唯一；重命名、排序、编辑和重新生成都不改变编码。已删除图标的编码仍保留，不分配给其他图标。导入编码冲突时自动分配新编码；升级时自动补齐旧图标缺失或重复的编码，保留其余有效编码。`PATCH /api/projects/{projectId}/icons/{iconId}` 的 `codepoint` 接受整数、十进制字符串、`U+E900` 或 `0xE900`，重复返回 409，无效或清空返回 400。修改已接入业务的编码后，应同步修改业务引用。
+
+TTF 将多色、渐变和非零透明度的图形合并为实心单色轮廓，保留孔洞、常见形状、变换及描边，原始 SVG 和 JS 的颜色不受影响。蒙版、裁剪、非缩放描边等尚不支持的 SVG 结构会明确提示图标名称，需先转换为普通路径后重试。
+
+网页也可以直接使用 TTF（`font-family` 中的数字替换为实际项目 ID，字符编码以图标选项为准）：
+
+```html
+<style>
+  @font-face {
+    font-family: "IconFamily-5";
+    src: url("/api/projects/5/ttf") format("truetype");
+  }
+  .icon { font-family: "IconFamily-5"; font-style: normal; }
+</style>
+<i class="icon" aria-hidden="true">&#xE900;</i>
+```
 
 项目 JS 使用固定地址：
 
@@ -156,9 +182,9 @@ npm start
 npm run package
 ```
 
-生成 `release/` 和 `iconfamily-<版本号>.zip`，包含编译后的前端及 Node 后端，不包含项目数据、开发依赖、开发脚本或 sourcemap。
+生成 `release/` 和 `iconfamily-<版本号>.zip`，包含编译后的前端、Node 后端及字体转换运行依赖，不包含项目数据、开发依赖、开发脚本或 sourcemap。打包时需要访问 npm 仓库以安装运行依赖。
 
-目标机器安装符合要求的 Node.js 后，解压并执行 `npm start`、`start.cmd` 或 `sh start.sh` 即可，无需安装 npm 依赖。
+目标机器安装符合要求的 Node.js 后，解压并执行 `npm start`、`start.cmd` 或 `sh start.sh` 即可。字体转换包含原生组件，发布包适用于打包机器相同的操作系统和 CPU 架构；跨平台部署请在目标平台运行 `npm install --omit=dev` 安装适用的原生组件，或使用 Docker 镜像。
 
 ### Docker 部署
 

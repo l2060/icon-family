@@ -45,7 +45,7 @@ export function ProjectForm({
   const [form] = Form.useForm<Values>();
   const everyoneCanEdit = Form.useWatch('everyoneCanEdit', form);
   const filename = Form.useWatch('jsFilename', form) || 'iconfont';
-  const downloadName = /\.js$/i.test(filename) ? filename : `${filename}.js`;
+  const downloadBase = filename.trim().replace(/\.(js|ttf)$/i, '') || 'iconfont';
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState('settings');
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -82,7 +82,7 @@ export function ProjectForm({
           themeColor: project ? projectColor(project) : '#1677ff',
           name: project?.name,
           prefix: project?.prefix,
-          jsFilename: project?.settings.jsFilename || '',
+          jsFilename: (project?.settings.jsFilename || '').replace(/\.(js|ttf)$/i, ''),
           collaboratorIds: project?.settings.collaboratorIds || [],
           everyoneCanEdit: project?.settings.everyoneCanEdit === true,
           margin: project?.settings.margin ?? 100,
@@ -151,15 +151,15 @@ export function ProjectForm({
                     </Form.Item>
                     <Form.Item
                       name="jsFilename"
-                      label={t('JS 文件名', 'JS filename')}
+                      label={t('导出文件名', 'Export filename')}
                       className="project-filename-field"
                       extra={t(
-                        `下载文件：${downloadName}（自动补 .js）`,
-                        `Download: ${downloadName} (.js added automatically)`,
+                        `下载文件：${downloadBase}.js / ${downloadBase}.ttf`,
+                        `Downloads: ${downloadBase}.js / ${downloadBase}.ttf`,
                       )}
                       tooltip={t(
-                        '原样用于下载，不添加前缀；留空使用 iconfont.js。',
-                        'Used as entered, without a prefix. Defaults to iconfont.js.',
+                        '两种格式共用文件名，扩展名按格式自动添加；留空使用 iconfont。',
+                        'Shared by both formats; the extension is added automatically. Defaults to iconfont.',
                       )}
                       rules={[
                         {
@@ -173,13 +173,13 @@ export function ProjectForm({
                     >
                       <Input placeholder="iconfont" style={{ maxWidth: 280 }} />
                     </Form.Item>
-                  <Form.Item
-                    name="themeColor"
-                    label={t('项目主题色', 'Project color')}
-                    getValueFromEvent={(color) => color.toHexString()}
-                  >
-                    <ColorPicker disabledAlpha showText />
-                  </Form.Item>
+                    <Form.Item
+                      name="themeColor"
+                      label={t('项目主题色', 'Project color')}
+                      getValueFromEvent={(color) => color.toHexString()}
+                    >
+                      <ColorPicker disabledAlpha showText />
+                    </Form.Item>
                   </div>
                   <Divider titlePlacement="start">{t('图标默认值', 'Icon defaults')}</Divider>
                   <Flex gap={20} wrap>

@@ -1,7 +1,7 @@
 import { memo, startTransition, useCallback, useEffect, useRef, useState } from 'react';
 import { Empty } from 'antd';
 import { usePreferences } from '../../preferences';
-import type { Icon } from '../../types';
+import type { Icon, IconFormat } from '../../types';
 import { IconCard } from './IconCard';
 import { useMarqueeSelection } from './useMarqueeSelection';
 import { IconContextMenu, type IconMenuTarget } from './IconContextMenu';
@@ -9,6 +9,7 @@ import { IconExportMenu } from './IconExportMenu';
 
 export const IconGrid = memo(function IconGrid({
   icons,
+  format,
   prefix,
   selected,
   onToggle,
@@ -21,6 +22,7 @@ export const IconGrid = memo(function IconGrid({
   onSelect,
 }: {
   icons: Icon[];
+  format: IconFormat;
   prefix: string;
   selected: Set<number>;
   onToggle: (id: number, range?: boolean, additive?: boolean, context?: boolean) => void;
@@ -87,6 +89,7 @@ export const IconGrid = memo(function IconGrid({
               <IconCard
                 key={icon.id}
                 icon={icon}
+                format={format}
                 prefix={prefix}
                 selected={selected.has(icon.id)}
                 onToggle={onToggle}

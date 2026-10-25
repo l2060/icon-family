@@ -80,7 +80,7 @@ test('admin grants collaboration, members edit without granting access, JS uses 
           element.scrollHeight <= element.clientHeight + 1,
       ),
   ).toBe(true);
-  await page.getByLabel('JS 文件名').fill('team-icons');
+  await page.getByLabel('导出文件名').fill('team-icons');
   await expect(page.getByLabel('em 尺寸', { exact: true })).toHaveCount(0);
   await expect(page.getByLabel('Codepoint 起始值', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('tab')).toHaveCount(2);

@@ -1,3 +1,4 @@
+import { allocateCodepoint, uniqueCodepoint, repairCodepoints } from './unicode.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -28,6 +29,17 @@ export class JsonStore {
     this.inTransaction = false;
     this.state = { nextIds: { users: 1, projects: 1, icons: 1, builds: 1, importJobs: 1, cartItems: 1 }, users: [], sessions: [], projects: [], icons: [], builds: [], importJobs: [], apiTokens: [], cartItems: [] };
     this.load();
+    this.transaction(() => {
+      for (const project of this.state.projects) {
+        const changes = repairCodepoints(this.projectCodepoints(project.id));
+        for (const change of changes) {
+          const icon = this.state.icons.find(icon => icon.id === change.id);
+          icon.codepoint = change.codepoint;
+          icon.revision = Number(icon.revision || 0) + 1;
+        }
+        if (changes.length) project.revision += 1;
+      }
+    });
   }
 
   load() {
@@ -223,7 +235,12 @@ export class JsonStore {
   iconByHash(projectId, sourceHash) { return iconView(this.state.icons.find((icon) => Number(icon.project_id) === Number(projectId) && icon.source_hash === sourceHash && icon.status === 'active')); }
   iconByRemoteId(projectId, provider, remoteId) { return iconView(this.state.icons.find((icon) => Number(icon.project_id) === Number(projectId) && icon.source_provider === provider && String(icon.source_remote_id) === String(remoteId) && icon.status === 'active')); }
 
+  projectCodepoints(projectId) {
+    return this.state.icons.filter(icon => Number(icon.project_id) === Number(projectId));
+  }
+
   createIcon(data) {
+    data = { ...data, codepoint: data.codepoint == null ? this.nextCodepoint(data.projectId) : uniqueCodepoint(this.projectCodepoints(data.projectId), data.codepoint) };
     const icon = { id: this.idFor('icons'), project_id: data.projectId, name: data.name, slug: data.slug, source_type: data.sourceType ?? 'upload', source_provider: data.sourceProvider ?? null, source_remote_id: data.sourceRemoteId ?? null, source_url: data.sourceUrl ?? null, source_meta: data.sourceMeta ?? null, source_hash: data.sourceHash, svg: data.svg, view_box: data.viewBox ?? '0 0 1024 1024', color_mode: data.colorMode ?? 'preserve', codepoint: data.codepoint ?? null, sort_order: data.sortOrder ?? 0, status: 'active', revision: 0, created_at: timestamp(), updated_at: timestamp() };
     this.state.icons.push(icon);
     const project = this.state.projects.find((candidate) => candidate.id === icon.project_id);
@@ -235,7 +252,7 @@ export class JsonStore {
   updateIcon(id, fields) {
     const icon = this.state.icons.find((candidate) => Number(candidate.id) === Number(id));
     if (!icon) return null;
-    Object.assign(icon, { name: fields.name ?? icon.name, slug: fields.slug ?? icon.slug, svg: fields.svg ?? icon.svg, view_box: fields.viewBox ?? icon.view_box, color_mode: fields.colorMode ?? icon.color_mode, codepoint: fields.codepoint === undefined ? icon.codepoint : fields.codepoint, source_hash: fields.sourceHash ?? icon.source_hash, source_meta: fields.sourceMeta === undefined ? icon.source_meta : fields.sourceMeta, revision: icon.revision + 1, updated_at: timestamp() });
+    Object.assign(icon, { name: fields.name ?? icon.name, slug: fields.slug ?? icon.slug, svg: fields.svg ?? icon.svg, view_box: fields.viewBox ?? icon.view_box, color_mode: fields.colorMode ?? icon.color_mode, codepoint: fields.codepoint === undefined ? icon.codepoint : uniqueCodepoint(this.projectCodepoints(icon.project_id), fields.codepoint, id), source_hash: fields.sourceHash ?? icon.source_hash, source_meta: fields.sourceMeta === undefined ? icon.source_meta : fields.sourceMeta, revision: icon.revision + 1, updated_at: timestamp() });
     const project = this.state.projects.find((candidate) => candidate.id === icon.project_id);
     if (project) { project.revision += 1; project.updated_at = timestamp(); }
     this.save();
@@ -253,8 +270,7 @@ export class JsonStore {
   }
 
   nextCodepoint(projectId, start = 0xe900) {
-    const values = this.state.icons.filter((icon) => Number(icon.project_id) === Number(projectId) && icon.codepoint).map((icon) => Number(icon.codepoint));
-    return Math.max(Number(start) || 0xe900, (values.length ? Math.max(...values) : 0) + 1);
+    return allocateCodepoint(this.projectCodepoints(projectId), start);
   }
 
   createBuild(projectId, sourceRevision, version) {

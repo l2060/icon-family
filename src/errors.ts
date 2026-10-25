@@ -1,6 +1,7 @@
 const english: Record<string, string> = {
   仅管理员或创建者可以修改项目设置: 'Only admins or the owner can change project settings.',
   'JS 文件名无效': 'Invalid JS filename.',
+  导出文件名无效: 'Invalid export filename.',
   协作用户无效: 'Invalid collaborator.',
   仅管理员或创建者可以删除项目: 'Only admins or the owner can delete a project.',
   '密码需为 6–128 位': 'Password must contain 6–128 characters.',
@@ -29,6 +30,9 @@ const english: Record<string, string> = {
   图标不存在: 'Icon not found.',
   '图标已被其他操作修改，请刷新后重试': 'The icon was modified elsewhere. Refresh and try again.',
   '图标 slug 已存在': 'An icon with this slug already exists.',
+  'Unicode 编码已被当前项目的其他图标占用':
+    'This Unicode code point is already used by another icon in this project.',
+  'Unicode 编码无效，请输入 U+E900 等有效编码': 'Enter a valid Unicode code point, such as U+E900.',
   '生成 iconfont.js 失败': 'Failed to generate iconfont.js.',
   构建失败: 'Build failed.',
   服务器内部错误: 'Internal server error.',

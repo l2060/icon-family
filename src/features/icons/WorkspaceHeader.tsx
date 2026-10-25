@@ -1,4 +1,4 @@
-import { App, Breadcrumb, Button, Flex, Typography } from 'antd';
+import { App, Breadcrumb, Button, Flex, Radio, Typography } from 'antd';
 import {
   DownloadOutlined,
   ThunderboltOutlined,
@@ -8,12 +8,14 @@ import {
 import { useState } from 'react';
 import { api, copyText } from '../../api';
 import { usePreferences } from '../../preferences';
-import type { Project } from '../../types';
+import type { IconFormat, Project } from '../../types';
 import { ProjectColorBar } from '../projects/ProjectTheme';
 import { folderPath } from '../folders/folderUtils';
 
 export function WorkspaceHeader({
   project,
+  format,
+  onFormatChange,
   count,
   onSettings,
   onRefresh,
@@ -22,6 +24,8 @@ export function WorkspaceHeader({
   onFolderSelect,
 }: {
   project: Project;
+  format: IconFormat;
+  onFormatChange: (format: IconFormat) => void;
   count: number;
   onSettings?: () => void;
   onRefresh: () => Promise<void>;
@@ -32,7 +36,7 @@ export function WorkspaceHeader({
   const { t } = usePreferences();
   const { message } = App.useApp();
   const [busy, setBusy] = useState('');
-  const url = `/api/projects/${project.id}/javascript`;
+  const url = `/api/projects/${project.id}/${format === 'ttf' ? 'ttf' : 'javascript'}`;
   async function perform(action: 'build' | 'download' | 'copy') {
     setBusy(action);
     try {
@@ -40,16 +44,19 @@ export function WorkspaceHeader({
         await copyText(new URL(url, location.origin).toString());
         message.success(t('已复制', 'Copied'));
       } else if (action === 'build') {
-        await api(`/projects/${project.id}/build`, 'POST', {});
+        await api(`/projects/${project.id}/${format === 'ttf' ? 'ttf' : 'build'}`, 'POST', {});
         await onRefresh();
-        message.success(t('已生成 iconfont.js', 'iconfont.js generated'));
+        message.success(t(`已生成 iconfont.${format}`, `iconfont.${format} generated`));
       } else {
         const response = await fetch(url);
-        if (!response.ok) throw new Error(t('下载失败', 'Download failed'));
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(body.error || t('下载失败', 'Download failed'));
+        }
         const blob = URL.createObjectURL(await response.blob());
         const link = document.createElement('a');
         link.href = blob;
-        link.download = project.settings.jsFilename || 'iconfont.js';
+        link.download = `${(project.settings.jsFilename || 'iconfont').replace(/\.(js|ttf)$/i, '')}.${format}`;
         link.click();
         setTimeout(() => URL.revokeObjectURL(blob), 1000);
         await onRefresh();
@@ -89,6 +96,19 @@ export function WorkspaceHeader({
         />
       </div>
       <Flex gap={8} wrap>
+        <Radio.Group
+          role="radiogroup"
+          aria-label={t('导出格式', 'Export format')}
+          value={format}
+          onChange={(event) => onFormatChange(event.target.value)}
+          optionType="button"
+          buttonStyle="solid"
+          disabled={!!busy}
+          options={[
+            { value: 'js', label: 'JavaScript' },
+            { value: 'ttf', label: 'TrueType Font' },
+          ]}
+        />
         {onSettings && (
           <Button icon={<SettingOutlined />} onClick={onSettings}>
             {t('设置', 'Settings')}
@@ -101,7 +121,7 @@ export function WorkspaceHeader({
           disabled={!!busy}
           onClick={() => void perform('build')}
         >
-          {t('生成 iconfont.js', 'Build iconfont.js')}
+          {t(`生成 iconfont.${format}`, `Build iconfont.${format}`)}
         </Button>
         <Button
           icon={<DownloadOutlined />}
@@ -109,7 +129,7 @@ export function WorkspaceHeader({
           disabled={!!busy}
           onClick={() => void perform('download')}
         >
-          {t('下载iconfont.js', 'Download latest')}
+          {t(`下载iconfont.${format}`, 'Download latest')}
         </Button>
         <Button icon={<LinkOutlined />} disabled={!!busy} onClick={() => void perform('copy')}>
           {t('复制 URL', 'Copy URL')}

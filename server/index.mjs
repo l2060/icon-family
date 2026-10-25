@@ -1,3 +1,5 @@
+import { uniqueCodepoint } from './unicode.mjs';
+import { normalizeExportFilename, exportFilename } from './export-filename.mjs';
 import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs';
@@ -395,7 +397,6 @@ async function importItems(project, items, sourceType = 'upload') {
   let succeeded = 0;
   let skipped = 0;
   let failed = 0;
-  let codepoint = store.nextCodepoint(project.id, project.settings?.codepointStart ?? 0xe900);
   for (const item of list) {
     try {
       let sourceUrl = item.sourceUrl ?? null;
@@ -427,7 +428,9 @@ async function importItems(project, items, sourceType = 'upload') {
         report.push({ name: item.name, status: 'skipped', reason: '相同 SVG 已存在' });
         continue;
       }
-      const unicode = item.unicode === null || item.unicode === undefined || item.unicode === '' ? codepoint : Number(String(item.unicode).replace(/^0x/i, '')) || codepoint;
+      let unicode;
+      try { unicode = uniqueCodepoint(store.projectCodepoints(project.id), item.unicode); }
+      catch { unicode = store.nextCodepoint(project.id, project.settings?.codepointStart); }
       const created = store.createIcon({
         projectId: project.id,
         name: prepared.name,
@@ -445,7 +448,6 @@ async function importItems(project, items, sourceType = 'upload') {
         sortOrder: Date.now() % 1_000_000,
       });
       await saveIconAssets(created, prepared.svg);
-      codepoint = Math.max(codepoint + 1, unicode + 1);
       succeeded += 1;
       report.push({ name: prepared.name, slug, status: 'success', iconId: created.id });
     } catch (error) {
@@ -502,6 +504,39 @@ async function repairLegacyIconfontIcons(project) {
 }
 
 const projectBuildJobs = new Map();
+const ttfBuildJobs = new Map();
+async function ensureLatestTtf(projectId) {
+  const id = Number(projectId);
+  if (!Number.isSafeInteger(id) || id <= 0) throw Object.assign(new Error('项目 ID 无效'), { statusCode: 400 });
+  if (ttfBuildJobs.has(id)) return ttfBuildJobs.get(id);
+  const job = (async () => {
+    let project = store.projectById(id);
+    if (!project) throw Object.assign(new Error('项目不存在'), { statusCode: 404 });
+    await repairLegacyIconfontIcons(project);
+    project = store.projectById(id);
+    const directory = path.join(ARTIFACTS_DIR, String(id));
+    const artifact = path.join(directory, 'latest.ttf');
+    const metadata = path.join(directory, 'latest.ttf.json');
+    try {
+      const saved = JSON.parse(await fsp.readFile(metadata, 'utf8'));
+      if (saved.revision === project.revision && saved.generator === 1) {
+        const content = await fsp.readFile(artifact);
+        if (hash(content) === saved.checksum) return { content, checksum: saved.checksum };
+      }
+    } catch (error) {
+      if (error.code && error.code !== 'ENOENT') throw error;
+    }
+    const { generateIconfontTtf } = await import('./ttf.mjs');
+    const content = generateIconfontTtf(project, store.listIcons(id));
+    const checksum = hash(content);
+    await writeAtomic(artifact, content);
+    await writeAtomic(metadata, JSON.stringify({ revision: project.revision, checksum, generator: 1 }));
+    return { content, checksum };
+  })();
+  ttfBuildJobs.set(id, job);
+  try { return await job; } finally { ttfBuildJobs.delete(id); }
+}
+
 async function buildProject(projectId) {
   const id = Number(projectId);
   if (projectBuildJobs.has(id)) return projectBuildJobs.get(id);
@@ -675,8 +710,7 @@ async function handleApi(req, res, urlObject) {
       if (user.role !== 'admin' && (body.everyoneCanEdit || body.collaboratorIds?.length)) return errorResponse(res, 403, '仅管理员可分配协作权限');
       const collaboration = { everyoneCanEdit: body.everyoneCanEdit === true, collaboratorIds: [...new Set(body.collaboratorIds || [])] };
       if (body.themeColor !== undefined && (typeof body.themeColor !== 'string' || !/^#[0-9a-f]{6}$/i.test(body.themeColor))) return errorResponse(res, 400, '项目主题色无效');
-      if (body.jsFilename && typeof body.jsFilename === 'string' && !/\.js$/i.test(body.jsFilename)) body.jsFilename += '.js';
-      if (body.jsFilename && (typeof body.jsFilename !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}\.js$/i.test(body.jsFilename))) return errorResponse(res, 400, 'JS 文件名无效');
+      body.jsFilename = normalizeExportFilename(body.jsFilename);
       const requestedMargin = Number(body.margin);
       const margin = Number.isFinite(requestedMargin) ? Math.min(512, Math.max(0, requestedMargin)) : DEFAULT_PROJECT_MARGIN;
       const project = store.createProject({ name, prefix: normalizePrefix(body.prefix || name), description: String(body.description ?? ''), ownerId: user.id, settings: { ...collaboration, themeColor: body.themeColor || '#1677ff', jsFilename: body.jsFilename || '', codepointStart: Number(body.codepointStart) || 0xe900, emSize: Number(body.emSize) || 1024, margin, defaultColorMode: body.defaultColorMode || 'preserve' } });
@@ -689,11 +723,12 @@ async function handleApi(req, res, urlObject) {
   // token checks: the generated sprite is the project's publishable asset.
   // A build is reused only when its source revision still matches the project;
   // otherwise the current project is built before the file is returned.
-  if (parts[0] === 'projects' && parts[1] && parts[2] === 'javascript' && parts.length === 3 && method === 'GET') {
+  if (parts[0] === 'projects' && parts[1] && ['javascript', 'ttf'].includes(parts[2]) && parts.length === 3 && method === 'GET') {
     const projectId = Number(parts[1]);
     try {
-      const latest = await ensureLatestPublicBuild(projectId);
-      const content = await fsp.readFile(latest.artifact_path, 'utf8');
+      const isTtf = parts[2] === 'ttf';
+      const latest = isTtf ? await ensureLatestTtf(projectId) : await ensureLatestPublicBuild(projectId);
+      const content = isTtf ? latest.content : await fsp.readFile(latest.artifact_path, 'utf8');
       const etag = latest.checksum ? `"${latest.checksum}"` : null;
       if (etag && String(req.headers['if-none-match'] || '') === etag) {
         res.writeHead(304, {
@@ -703,15 +738,15 @@ async function handleApi(req, res, urlObject) {
         });
         return res.end();
       }
-      return text(res, 200, content, 'application/javascript; charset=utf-8', {
-        'Content-Disposition': `attachment; filename="${store.projectById(projectId).settings.jsFilename || 'iconfont.js'}"`,
+      return text(res, 200, content, isTtf ? 'font/ttf' : 'application/javascript; charset=utf-8', {
+        'Content-Disposition': `attachment; filename="${exportFilename(store.projectById(projectId), isTtf ? 'ttf' : 'js')}"`,
         ...(etag ? { ETag: etag } : {}),
         'Cache-Control': 'no-cache, must-revalidate',
         'Access-Control-Allow-Origin': '*',
       });
     } catch (error) {
       const status = [400, 404].includes(Number(error.statusCode)) ? Number(error.statusCode) : 500;
-      return errorResponse(res, status, error.message || '生成 iconfont.js 失败');
+      return errorResponse(res, status, error.message || '生成图标文件失败');
     }
   }
 
@@ -721,6 +756,13 @@ async function handleApi(req, res, urlObject) {
     const projectAccess = await requireProject(req, res, projectId, method !== 'GET');
     if (!projectAccess) return;
     const { project, context } = projectAccess;
+
+    if (action === 'ttf' && parts.length === 3 && method === 'POST') {
+      try {
+        const result = await ensureLatestTtf(projectId);
+        return json(res, 200, { checksum: result.checksum, url: `/api/projects/${projectId}/ttf` });
+      } catch (error) { return errorResponse(res, 422, error.message); }
+    }
 
     if (!action && method === 'GET') {
       await repairLegacyIconfontIcons(project);
@@ -738,8 +780,7 @@ async function handleApi(req, res, urlObject) {
       const nextSettings = { ...(project.settings || {}), ...(body.settings && typeof body.settings === 'object' ? body.settings : {}) };
       nextSettings.folders = store.projectById(projectId).settings.folders || [];
       if (nextSettings.themeColor !== undefined && (typeof nextSettings.themeColor !== 'string' || !/^#[0-9a-f]{6}$/i.test(nextSettings.themeColor))) return errorResponse(res, 400, '项目主题色无效');
-      if (nextSettings.jsFilename && typeof nextSettings.jsFilename === 'string' && !/\.js$/i.test(nextSettings.jsFilename)) nextSettings.jsFilename += '.js';
-      if (nextSettings.jsFilename && (typeof nextSettings.jsFilename !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}\.js$/i.test(nextSettings.jsFilename))) return errorResponse(res, 400, 'JS 文件名无效');
+      nextSettings.jsFilename = normalizeExportFilename(nextSettings.jsFilename);
       if (context.user.role !== 'admin') {
         nextSettings.everyoneCanEdit = project.settings?.everyoneCanEdit === true;
         nextSettings.collaboratorIds = project.settings?.collaboratorIds || [];

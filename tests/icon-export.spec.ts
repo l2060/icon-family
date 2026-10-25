@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
-test('copy code and SVG, download SVG and every PNG size', async ({ page }) => {
+test('copy code, hexadecimal Unicode and SVG, download SVG and every PNG size', async ({
+  page,
+}) => {
   await page.request.post('/api/auth/login', {
     data: { username: 'admin', password: 'test-password' },
   });
@@ -26,7 +28,23 @@ test('copy code and SVG, download SVG and every PNG size', async ({ page }) => {
   await card.getByRole('button', { name: '复制代码', exact: true }).click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('export-sample');
   await expect(page.getByText('已复制代码：export-sample', { exact: true })).toBeVisible();
+  const format = page.getByRole('radiogroup', { name: '导出格式' });
+  await format.getByText('TrueType Font', { exact: true }).click();
+  await expect(format.getByRole('radio', { name: 'TrueType Font', exact: true })).toBeChecked();
+  await card.getByRole('button', { name: '复制 Unicode', exact: true }).click();
+  await expect(page.getByText('已复制 Unicode：0xE900', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('0xE900');
+  await expect(card.getByRole('button', { name: '复制代码', exact: true })).toHaveCount(0);
+  await format.getByText('JavaScript', { exact: true }).click();
+  await expect(format.getByRole('radio', { name: 'JavaScript', exact: true })).toBeChecked();
+  await card.getByRole('button', { name: '复制代码', exact: true }).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('export-sample');
+  await expect(card.getByRole('checkbox')).not.toBeChecked();
   const open = () => card.getByRole('button', { name: '导出图标 sample' }).click();
+  await open();
+  await page.getByRole('menuitem', { name: '复制 Unicode (0xE900)' }).click();
+  await expect(page.getByText('已复制 Unicode：0xE900', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('0xE900');
   await open();
   await page.getByRole('menuitem', { name: '复制 SVG' }).click();
   const svg = await page.evaluate(() => navigator.clipboard.readText());
@@ -40,14 +58,20 @@ test('copy code and SVG, download SVG and every PNG size', async ({ page }) => {
   expect(await readFile((await downloadedSvg.path())!, 'utf8')).toBe(svg);
   for (const size of [16, 32, 64, 128, 256, 512, 1024]) {
     await open();
-    await page.getByRole('menuitem', { name: '下载 PNG' }).hover();
+    const pngMenu = page.getByRole('menuitem', { name: '下载 PNG' });
+    await pngMenu.focus();
+    await pngMenu.press('ArrowRight');
     await expect(
       page.getByRole('menuitem', { name: `${size} × ${size} px`, exact: true }),
     ).toBeVisible();
     const download = page.waitForEvent('download', { timeout: 5000 }).catch(async (error) => {
       throw new Error(`${error.message}\n${await page.locator('body').innerText()}`);
     });
-    await page.getByRole('menuitem', { name: `${size} × ${size} px`, exact: true }).click();
+    const sizeOption = page.getByRole('menuitem', { name: `${size} × ${size} px`, exact: true });
+    // Keep the pointer on the parent while selecting the portalled submenu by
+    // keyboard, so its hover animation cannot close it during pointer travel.
+    await sizeOption.focus();
+    await sizeOption.press('Enter');
     const file = await download;
     expect(file.suggestedFilename()).toBe(`export-sample-${size}.png`);
     const png = await readFile((await file.path())!);

@@ -45,7 +45,8 @@ export function SvgEditor({
     elementOrders: {},
     name: icon.name,
     slug: icon.slug,
-    codepoint: String(icon.codepoint ?? ''),
+    codepoint:
+      icon.codepoint == null ? '' : `U+${Number(icon.codepoint).toString(16).toUpperCase()}`,
     colorMode: icon.color_mode || 'preserve',
   });
   const history = useRef<EditState[]>([]);

@@ -27,6 +27,15 @@ export function EditorProperties({
             onChange={(event) => change({ slug: event.target.value })}
           />
         </Form.Item>
+        <Form.Item label="Unicode" htmlFor="editor-unicode">
+          <Input
+            id="editor-unicode"
+            value={state.codepoint}
+            placeholder="U+E900"
+            title={t('同一项目内唯一，例如 U+E900', 'Unique within this project, e.g. U+E900')}
+            onChange={(event) => change({ codepoint: event.target.value })}
+          />
+        </Form.Item>
         <Form.Item label={t('颜色模式', 'Color mode')} htmlFor="editor-color">
           <Select
             id="editor-color"

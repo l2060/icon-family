@@ -3,7 +3,7 @@ import { App, Button, Flex, Input, Segmented, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { api, copyText } from '../../api';
 import { usePreferences } from '../../preferences';
-import type { Icon, ImportJob, Project, ProjectDetail } from '../../types';
+import type { Icon, IconFormat, ImportJob, Project, ProjectDetail } from '../../types';
 import { MoveIconsDialog, type MoveResult } from '../folders/MoveIconsDialog';
 import { CopyIconDialog } from './CopyIconDialog';
 import { IconGrid } from './IconGrid';
@@ -50,6 +50,7 @@ export const IconWorkspace = memo(function IconWorkspace({
     [project.id, onIconSaved],
   );
   const [search, setSearch] = useState('');
+  const [format, setFormat] = useState<IconFormat>('js');
   const [report, setReport] = useState<ImportJob>();
   const [batch, setBatch] = useState<BatchType>();
   const [editing, setEditing] = useState<Icon>();
@@ -96,10 +97,16 @@ export const IconWorkspace = memo(function IconWorkspace({
   const copy = useCallback(
     (name: string) => {
       void copyText(name)
-        .then(() => message.success(t(`已复制代码：${name}`, `Copied code: ${name}`)))
+        .then(() =>
+          message.success(
+            format === 'ttf'
+              ? t(`已复制 Unicode：${name}`, `Copied Unicode: ${name}`)
+              : t(`已复制代码：${name}`, `Copied code: ${name}`),
+          ),
+        )
         .catch((e) => message.error(e.message));
     },
-    [message, t],
+    [message, t, format],
   );
   const all = visible.length > 0 && visible.every((icon) => selected.has(icon.id));
   async function imported(job: ImportJob) {
@@ -112,6 +119,8 @@ export const IconWorkspace = memo(function IconWorkspace({
       <Flex vertical className="workspace">
         <WorkspaceHeader
           project={project}
+          format={format}
+          onFormatChange={setFormat}
           count={icons.length}
           onSettings={onSettings}
           onRefresh={onRefresh}
@@ -184,6 +193,7 @@ export const IconWorkspace = memo(function IconWorkspace({
         </Flex>
         <IconGrid
           icons={visible}
+          format={format}
           prefix={project.prefix}
           selected={selected}
           onToggle={toggle}

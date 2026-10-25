@@ -1,3 +1,5 @@
+export type IconFormat = 'js' | 'ttf';
+
 export interface User {
   id: number;
   username: string;

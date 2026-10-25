@@ -32,7 +32,11 @@ test('project workflow, SVG editing, theme and language persistence', async ({ p
   await page.getByRole('button', { name: '整体调整边距' }).click();
   await page.getByLabel('项目边距', { exact: true }).fill('120');
   await page.getByRole('button', { name: '确 定' }).click();
-  await expect(page.getByText(/边距 120/)).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.getByRole('checkbox', { name: '选择 square edited', exact: true }).check();
+  await page.getByRole('button', { name: '整体调整边距' }).click();
+  await expect(page.getByLabel('项目边距', { exact: true })).toHaveAttribute('aria-valuenow', '120');
+  await page.getByRole('button', { name: /^取\s*消$/ }).click();
   await page.getByRole('button', { name: '生成 iconfont.js' }).click();
   await expect(page.getByText('已生成 iconfont.js', { exact: true })).toBeVisible();
   const download = page.waitForEvent('download');

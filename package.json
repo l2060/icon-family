@@ -24,10 +24,13 @@
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.4",
+    "@napi-rs/canvas": "^1.0.13",
+    "@xmldom/xmldom": "^0.9.12",
     "antd": "^6.6.5",
     "dompurify": "^3.4.15",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "svg2ttf": "^6.1.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

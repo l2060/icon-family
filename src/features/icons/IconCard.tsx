@@ -4,10 +4,11 @@ import { DownOutlined } from '@ant-design/icons';
 import { iconName } from '../../api';
 import { SvgPreview } from '../../components/SvgPreview';
 import { usePreferences } from '../../preferences';
-import type { Icon } from '../../types';
+import type { Icon, IconFormat } from '../../types';
 
 export const IconCard = memo(function IconCard({
   icon,
+  format,
   prefix,
   selected,
   onToggle,
@@ -16,6 +17,7 @@ export const IconCard = memo(function IconCard({
   onExport,
 }: {
   icon: Icon;
+  format: IconFormat;
   prefix: string;
   selected: boolean;
   onToggle: (id: number, range?: boolean, additive?: boolean, context?: boolean) => void;
@@ -25,6 +27,14 @@ export const IconCard = memo(function IconCard({
 }) {
   const { t } = usePreferences();
   const name = iconName(prefix, icon.slug);
+  const codepoint = Number(icon.codepoint);
+  const unicode =
+    icon.codepoint != null && Number.isInteger(codepoint) && codepoint > 0
+      ? `0x${codepoint.toString(16).toUpperCase()}`
+      : '';
+  const copyValue = format === 'ttf' ? unicode : name;
+  const copyLabel =
+    format === 'ttf' ? t('复制 Unicode', 'Copy Unicode') : t('复制代码', 'Copy code');
   return (
     <Card
       size="small"
@@ -70,16 +80,17 @@ export const IconCard = memo(function IconCard({
         <Button
           className="icon-copy-button"
           size="small"
-          title={`${t('复制代码', 'Copy code')}: ${name}`}
-          onClick={() => onCopy(name)}
+          title={`${copyLabel}: ${copyValue}`}
+          disabled={!copyValue}
+          onClick={() => onCopy(copyValue)}
         >
-          {t('复制代码', 'Copy code')}
+          {copyLabel}
         </Button>
         <Button
           size="small"
           className="icon-export-button"
           icon={<DownOutlined />}
-          title={t('复制 SVG / 下载', 'Copy SVG / Download')}
+          title={t('复制 Unicode / SVG / 下载', 'Copy Unicode / SVG / Download')}
           aria-label={`${t('导出图标', 'Export icon')} ${icon.name}`}
           onClick={(event) => {
             const box = event.currentTarget.getBoundingClientRect();

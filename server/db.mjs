@@ -1,3 +1,4 @@
+import { allocateCodepoint, uniqueCodepoint, repairCodepoints } from './unicode.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -51,6 +52,14 @@ export class Store {
     this.db = new DatabaseSync(path.join(dataDir, 'iconfamily.sqlite'));
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     this.init();
+    this.transaction(() => {
+      for (const { id } of this.db.prepare('SELECT id FROM projects').all()) {
+        const changes = repairCodepoints(this.projectCodepoints(id));
+        for (const change of changes) this.db.prepare('UPDATE icons SET codepoint=?,revision=revision+1 WHERE id=?').run(change.codepoint, change.id);
+        if (changes.length) this.db.prepare('UPDATE projects SET revision=revision+1 WHERE id=?').run(id);
+      }
+      this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_icons_unicode ON icons(project_id, codepoint)');
+    });
   }
 
   init() {
@@ -326,7 +335,12 @@ export class Store {
     return iconRow(this.db.prepare('SELECT * FROM icons WHERE project_id=? AND source_provider=? AND source_remote_id=? AND status=\'active\'').get(projectId, provider, String(remoteId)));
   }
 
+  projectCodepoints(projectId) {
+    return this.db.prepare('SELECT id,codepoint FROM icons WHERE project_id=? ORDER BY id').all(projectId);
+  }
+
   createIcon(data) {
+    data = { ...data, codepoint: data.codepoint == null ? this.nextCodepoint(data.projectId) : uniqueCodepoint(this.projectCodepoints(data.projectId), data.codepoint) };
     const timestamp = now();
     const result = this.db.prepare(`
       INSERT INTO icons(project_id,name,slug,source_type,source_provider,source_remote_id,source_url,source_meta,source_hash,svg,view_box,color_mode,codepoint,sort_order,created_at,updated_at)
@@ -345,7 +359,7 @@ export class Store {
       svg: fields.svg ?? current.svg,
       viewBox: fields.viewBox ?? current.view_box,
       colorMode: fields.colorMode ?? current.color_mode,
-      codepoint: fields.codepoint === undefined ? current.codepoint : fields.codepoint,
+      codepoint: fields.codepoint === undefined ? current.codepoint : uniqueCodepoint(this.projectCodepoints(current.project_id), fields.codepoint, id),
       sourceHash: fields.sourceHash ?? current.source_hash,
       sourceMeta: fields.sourceMeta === undefined ? current.sourceMeta : fields.sourceMeta,
     };
@@ -366,8 +380,7 @@ export class Store {
   }
 
   nextCodepoint(projectId, start = 0xe900) {
-    const row = this.db.prepare('SELECT MAX(codepoint) AS max FROM icons WHERE project_id=?').get(projectId);
-    return Math.max(Number(start) || 0xe900, Number(row?.max ?? 0) + 1);
+    return allocateCodepoint(this.projectCodepoints(projectId), start);
   }
 
   createBuild(projectId, sourceRevision, version) {

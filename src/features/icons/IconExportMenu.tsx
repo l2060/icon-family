@@ -17,6 +17,11 @@ export function IconExportMenu({
 }) {
   const { t } = usePreferences();
   const { message } = App.useApp();
+  const codepoint = Number(target.icon.codepoint);
+  const unicode =
+    target.icon.codepoint != null && Number.isInteger(codepoint) && codepoint > 0
+      ? `0x${codepoint.toString(16).toUpperCase()}`
+      : '';
   useEffect(() => {
     const outside = (event: PointerEvent) => {
       if (!(event.target as Element).closest('.icon-export-popup')) onClose();
@@ -45,6 +50,12 @@ export function IconExportMenu({
       }}
       menu={{
         items: [
+          {
+            key: 'copy-unicode',
+            label: `${t('复制 Unicode', 'Copy Unicode')}${unicode ? ` (${unicode})` : ''}`,
+            icon: <CopyOutlined />,
+            disabled: !unicode,
+          },
           { key: 'copy-svg', label: t('复制 SVG', 'Copy SVG'), icon: <CopyOutlined /> },
           { key: 'svg', label: t('下载 SVG', 'Download SVG'), icon: <DownloadOutlined /> },
           {
@@ -64,6 +75,11 @@ export function IconExportMenu({
           onClose();
           const name = iconName(prefix, target.icon.slug);
           void (async () => {
+            if (key === 'copy-unicode') {
+              await copyText(unicode);
+              message.success(t(`已复制 Unicode：${unicode}`, `Copied Unicode: ${unicode}`));
+              return;
+            }
             const svg = exportSvg(target.icon.svg);
             if (key === 'copy-svg') {
               await copyText(svg);

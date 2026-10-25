@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,7 +28,7 @@ async function stop(child) {
 
 const release = path.join(root, 'release');
 const manifest = JSON.parse(await readFile(path.join(release, 'package.json'), 'utf8'));
-assert.equal(manifest.dependencies, undefined);
+assert(manifest.dependencies?.svg2ttf);
 const production = spawn(process.execPath, ['--use-system-ca', 'server/index.mjs'], { cwd: release, env: { ...env, PORT: '3111' }, windowsHide: true, stdio: 'pipe' });
 production.stdout.resume(); production.stderr.resume();
 try {
@@ -38,7 +38,24 @@ try {
   const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map(match => match[1]);
   assert(assets.length > 0);
   for (const asset of assets) assert.equal((await fetch(`http://127.0.0.1:3111${asset}`)).status, 200);
-  console.log('Standalone release: HTML, compiled assets and API passed.');
+  const fontModule = await import(new URL('../release/server/ttf.mjs', import.meta.url));
+  assert.equal(fontModule.generateIconfontTtf({ id: 1 }, []).readUInt32BE(0), 0x00010000);
+  const login = await fetch('http://127.0.0.1:3111/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'admin', password: env.ADMIN_PASSWORD }) });
+  assert.equal(login.status, 200);
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const created = await fetch('http://127.0.0.1:3111/api/projects', { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Runtime font', prefix: 'runtime' }) });
+  const { project } = await created.json();
+  const url = `http://127.0.0.1:3111/api/projects/${project.id}/ttf`;
+  const responses = await Promise.all([fetch(url), fetch(url)]);
+  for (const response of responses) assert.equal(response.status, 200);
+  const original = Buffer.from(await responses[0].arrayBuffer());
+  assert.equal(original.readUInt32BE(0), 0x00010000);
+  const cached = path.join(data, 'artifacts', String(project.id), 'latest.ttf');
+  await unlink(cached);
+  assert.deepEqual(Buffer.from(await (await fetch(url)).arrayBuffer()), original, 'missing TTF is rebuilt');
+  await writeFile(cached, 'corrupt font');
+  assert.deepEqual(Buffer.from(await (await fetch(url)).arrayBuffer()), original, 'corrupt TTF is rebuilt');
+  console.log('Standalone release: HTML, compiled assets, API and TTF cache recovery passed.');
 } finally { await stop(production); }
 
 assert(process.env.npm_execpath, 'Run using npm run test:runtime');

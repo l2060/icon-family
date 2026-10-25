@@ -13,7 +13,7 @@ async function exists(file) {
 }
 
 async function check() {
-  const required = ['package.json', 'README.md', 'server/index.mjs', 'server/cart.mjs', 'server/core.mjs', 'server/svg-safety.mjs', 'server/db.mjs', 'server/fs-store.mjs', 'dist/index.html'];
+  const required = ['package.json', 'README.md', 'server/index.mjs', 'server/cart.mjs', 'server/core.mjs', 'server/svg-safety.mjs', 'server/db.mjs', 'server/fs-store.mjs', 'server/ttf.mjs', 'server/unicode.mjs', 'dist/index.html'];
   for (const file of required) if (!(await exists(path.join(root, file)))) throw new Error(`缺少打包文件：${file}`);
   for (const file of ['server/index.mjs', 'server/cart.mjs', 'server/core.mjs', 'server/db.mjs', 'server/fs-store.mjs']) {
     execFileSync(process.execPath, ['--check', path.join(root, file)], { stdio: 'inherit' });
@@ -102,7 +102,12 @@ async function packageRelease() {
   await fs.cp(path.join(root, 'server'), path.join(release, 'server'), { recursive: true });
   await fs.cp(path.join(root, 'dist'), path.join(release, 'dist'), { recursive: true, filter: (source) => !source.endsWith('.map') });
   const manifest = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
-  await fs.writeFile(path.join(release, 'package.json'), JSON.stringify({ name: manifest.name, version: manifest.version, private: true, type: 'module', engines: manifest.engines, scripts: { start: 'node --use-system-ca server/index.mjs' } }, null, 2));
+  const dependencies = Object.fromEntries(['@napi-rs/canvas', '@xmldom/xmldom', 'svg2ttf'].map(name => [name, manifest.dependencies[name]]));
+  await fs.writeFile(path.join(release, 'package.json'), JSON.stringify({ name: manifest.name, version: manifest.version, private: true, type: 'module', engines: manifest.engines, dependencies, scripts: { start: 'node --use-system-ca server/index.mjs' } }, null, 2));
+  // Include runtime font conversion dependencies, including the native binary
+  // for the platform on which this release is packaged.
+  const npmCli = process.env.npm_execpath || path.join(path.dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js');
+  execFileSync(process.execPath, [npmCli, 'install', '--omit=dev', '--no-audit', '--no-fund'], { cwd: release, stdio: 'inherit', windowsHide: true });
   await fs.copyFile(path.join(root, 'README.md'), path.join(release, 'README.md'));
   await fs.cp(path.join(root, 'docs'), path.join(release, 'docs'), { recursive: true });
   if (await exists(path.join(root, '.env.example'))) await fs.copyFile(path.join(root, '.env.example'), path.join(release, '.env.example'));
