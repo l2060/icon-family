@@ -6,6 +6,95 @@
 
 **图标更新后，固定地址自动提供最新 iconfont.js，也能一键下载最新 JS 文件。** 业务项目无需随着每次构建更换资源地址。
 
+## 快速使用
+
+安装 Docker 和 Docker Compose 后，即可使用 [Docker Hub 镜像 vblegend2030/icon-family](https://hub.docker.com/r/vblegend2030/icon-family) 启动服务，无需下载源码、安装 Node.js 或单独部署数据库。
+
+### Docker 镜像说明
+
+| 项目 | 说明 |
+| --- | --- |
+| 镜像 | `vblegend2030/icon-family` |
+| 最新标签 | `latest` |
+| 本次发布标签 | `20261027-sort`，包含图标排序和用户排序偏好记忆 |
+| 平台 | `linux/amd64`（x86-64）；本次未发布原生 ARM64 镜像 |
+| 压缩体积 | 约 62 MB；本地占用受 Docker 存储方式和共享层影响 |
+| 运行环境 | Node.js 22 最小运行时、前端静态资源、SQLite 和 SVG / TTF 所需依赖 |
+| 容器端口 | `3000`，页面和 API 共用一个端口 |
+| 数据目录 | `/data`，保存数据库、项目资源和构建产物，需挂载持久化存储 |
+
+镜像不包含 npm、Yarn、Shell 或开发工具。查看运行日志可用 `docker logs icon-family`。以下示例适用于 Linux 服务器，使用 `/home/icon-family/data` 保存数据；首次启动前请替换管理员密码。
+
+### 使用 Docker Compose（推荐）
+
+创建部署目录：
+
+```sh
+mkdir -p /home/icon-family/data
+cd /home/icon-family
+```
+
+在此目录创建 `docker-compose.yml`：
+
+```yaml
+services:
+  icon-family:
+    image: vblegend2030/icon-family:latest
+    container_name: icon-family
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATA_DIR: /data
+      STORAGE_DRIVER: sqlite
+      ADMIN_USER: admin
+      ADMIN_PASSWORD: "替换为你的强密码"
+    volumes:
+      - /home/icon-family/data:/data
+```
+
+```sh
+docker compose pull
+docker compose up -d
+```
+
+### 使用 docker run
+
+也可以直接执行以下命令；与 Compose 方式任选其一，避免同名容器或端口冲突：
+
+```sh
+mkdir -p /home/icon-family/data
+docker pull vblegend2030/icon-family:latest
+docker run -d \
+  --name icon-family \
+  --restart unless-stopped \
+  -p 3000:3000 \
+  -v /home/icon-family/data:/data \
+  -e DATA_DIR=/data \
+  -e STORAGE_DRIVER=sqlite \
+  -e ADMIN_USER=admin \
+  -e ADMIN_PASSWORD='替换为你的强密码' \
+  vblegend2030/icon-family:latest
+```
+
+以上多行命令使用 Bash / sh 语法。Windows Docker Desktop 使用 Linux 容器时，可将 Compose 的宿主机数据路径改为 `./data`；PowerShell 的 `docker run` 命令需合并为一行并使用可挂载的本地绝对路径。
+
+### 访问、更新与数据保留
+
+打开 `http://服务器IP:3000`，使用 `admin` 和配置的密码登录；本机运行时访问 `http://localhost:3000`。`ADMIN_USER` / `ADMIN_PASSWORD` 仅用于首次初始化，不会重置已有账号。端口被占用时可将映射改为 `8080:3000`，然后访问宿主机的 8080 端口。
+
+Compose 部署的更新命令：
+
+```sh
+cd /home/icon-family
+docker compose pull
+docker compose up -d
+```
+
+`docker run` 部署时，先 `docker pull vblegend2030/icon-family:latest`，再执行 `docker stop icon-family` 和 `docker rm icon-family`，最后使用原数据挂载路径重新运行上面的启动命令。保留 `/home/icon-family/data` 即可保留数据；已有部署若使用其他目录或命名卷，应继续挂载原存储，不能直接切换到空目录。备份 SQLite 数据时建议先停止容器，再备份整个数据目录。
+
+需要固定本次版本时，将示例中的 `:latest` 改为 `:20261027-sort`。镜像更新后需重新创建容器才会生效。
+
 ## 为什么做这个：苦 iconfont 久矣
 
 找图标只是开始。真正落到项目里，还要统一命名、调整颜色和边距、分配协作权限、更新资源，再把最新文件交给开发使用。
@@ -188,59 +277,6 @@ npm run package
 目标机器安装符合要求的 Node.js 后，解压并执行 `npm start`、`start.cmd` 或 `sh start.sh` 即可。字体转换包含原生组件，发布包适用于打包机器相同的操作系统和 CPU 架构；跨平台部署请在目标平台运行 `npm install --omit=dev` 安装适用的原生组件，或使用 Docker 镜像。
 
 ### Docker 部署
-
-#### 使用官方镜像（推荐）
-
-Docker Hub：[vblegend2030/icon-family](https://hub.docker.com/r/vblegend2030/icon-family)。直接拉取镜像即可部署，无需下载源码或在宿主机安装 Node.js。
-
-```sh
-docker pull vblegend2030/icon-family:latest
-docker run -d \
-  --name icon-family \
-  --restart unless-stopped \
-  -p 3000:3000 \
-  -v iconfamily-data:/data \
-  -e ADMIN_USER=admin \
-  -e ADMIN_PASSWORD='替换为你的强密码' \
-  vblegend2030/icon-family:latest
-```
-
-访问 `http://localhost:3000`，使用 `admin` 和设置的密码登录。以上为 Bash / sh 多行命令；Windows PowerShell 可合并为一行执行。管理员账号密码仅用于首次初始化，不会覆盖已有账号。
-
-也可以在独立部署目录创建以下 `docker-compose.yml`，通过 Compose 管理官方镜像：
-
-```yaml
-services:
-  icon-family:
-    image: vblegend2030/icon-family:latest
-    container_name: icon-family
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    environment:
-      DATA_DIR: /data
-      ADMIN_USER: admin
-      ADMIN_PASSWORD: "替换为你的强密码"
-    volumes:
-      - iconfamily-data:/data
-
-volumes:
-  iconfamily-data:
-    name: iconfamily-data
-```
-
-```sh
-# 首次启动
-docker compose up -d
-
-# 更新镜像并重新创建服务容器
-docker compose pull
-docker compose up -d
-```
-
-两种启动方式任选其一，避免同名容器或端口冲突。以上官方镜像示例将数据持久化在 `iconfamily-data` 卷中，更新时保留该卷，不要执行 `docker compose down -v`。如果已有部署，请沿用原数据卷名称；仓库自带的源码构建配置则默认挂载 `/home/icon-family/data`。
-
-示例使用 `latest`；需要固定版本时，请从 Docker Hub 的 Tags 页面选择已发布的标签。镜像更新不会自动替换正在运行的容器，使用 `docker run` 部署时需拉取新镜像后重建容器，并挂载原数据卷。
 
 #### 从源码构建镜像
 
