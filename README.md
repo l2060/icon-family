@@ -133,6 +133,7 @@ GET /api/projects/{projectId}/javascript
 | 大量图标加载 | 精简工作区接口字段、缓存 SVG 清洗结果、分批挂载卡片，让首批图标尽早出现；使用普通滚动，不使用虚拟列表 |
 | 编辑保存 | 仅更新变更图标，避免重新请求整个矩阵 |
 | 批量选择 | 默认单选，Ctrl / Cmd 多选、Shift 连选及拖动框选；右键操作与选中状态联动 |
+| 图标排序 | 搜索框左侧按钮组支持名称 / 创建时间、升序 / 降序；名称按自然顺序排列，排序偏好按登录用户保存在当前浏览器，刷新、重新打开及重新登录后恢复 |
 | 长列表浏览 | 主界面仅图标区域滚动；商店筛选和页码固定，中间结果滚动 |
 | 定位与恢复 | hash 路由记录项目、目录及全部视图，支持刷新、前进后退和登录后返回；目录失效时提示并回到全部视图 |
 | 布局稳定 | 面包屑固定在标题区，弹窗采用紧凑布局，项目设置固定高度，用户表格分页 |
@@ -237,13 +238,17 @@ docker compose pull
 docker compose up -d
 ```
 
-两种启动方式任选其一，避免同名容器或端口冲突。数据持久化在 `iconfamily-data` 卷中，更新时保留该卷，不要执行 `docker compose down -v`。如果已有部署，请沿用原数据卷名称；仓库自带的 Compose 默认会为卷名添加部署项目名前缀。
+两种启动方式任选其一，避免同名容器或端口冲突。以上官方镜像示例将数据持久化在 `iconfamily-data` 卷中，更新时保留该卷，不要执行 `docker compose down -v`。如果已有部署，请沿用原数据卷名称；仓库自带的源码构建配置则默认挂载 `/home/icon-family/data`。
 
 示例使用 `latest`；需要固定版本时，请从 Docker Hub 的 Tags 页面选择已发布的标签。镜像更新不会自动替换正在运行的容器，使用 `docker run` 部署时需拉取新镜像后重建容器，并挂载原数据卷。
 
 #### 从源码构建镜像
 
 仓库自带的 `docker-compose.yml` 使用本地源码构建，适用于自行修改代码后部署。
+
+镜像采用多阶段构建：使用 Node.js 22 Alpine 安装锁定的后端生产依赖，最终以 `scratch` 为基础，仅复制 Node.js 可执行文件、musl/C++ 运行库、CA 证书、后端依赖及前端产物。React、Ant Design 等前端依赖只在编译时使用；最终镜像不包含 npm、Yarn、Shell、系统包管理器、安装缓存或项目文档。SQLite、SVG 处理和 TTF 转换所需组件保留。
+
+运行镜像没有 `sh` / `bash`，排查问题请使用 `docker logs`，或通过 `docker exec <容器名> /usr/local/bin/node ...` 执行诊断代码。管理员初始密码通过运行时 `ADMIN_PASSWORD` 设置，不写入 Dockerfile。
 
 当前 Dockerfile 直接复制本地 `dist/`，因此需先在项目根目录编译前端：
 
@@ -252,13 +257,31 @@ npm ci
 npm run build
 ```
 
-先在 `docker-compose.yml` 中修改 `ADMIN_PASSWORD`，再运行：
+复制 `.env.example` 为 `.env`，按需设置 `ADMIN_PASSWORD`、`ICONFAMILY_PORT` 和 `ICONFAMILY_DATA_DIR`，再运行：
 
 ```sh
 docker compose up -d --build
 ```
 
-访问 `http://localhost:3000`。镜像包含预先编译的前端与 Node 后端，数据保存在命名卷中。当前 Compose 的环境变量为显式配置，仅修改宿主机 `.env` 不会覆盖其中的密码。
+访问 `http://localhost:3000`。默认容器名为 `icon-family`，镜像为 `icon-family:latest`，宿主机 `/home/icon-family/data` 挂载到容器 `/data`。Windows 本地 Docker 可将 `ICONFAMILY_DATA_DIR` 改为 `./data`。已有命名卷部署需先迁移数据，或继续使用原卷配置。
+
+#### Windows 一键部署到 Docker 服务器
+
+```powershell
+npm run deploy:docker
+```
+
+脚本在本机执行 `npm ci` 和前端构建，只上传 Dockerfile、依赖清单、后端及前端产物。目标服务器只需要 Docker、Compose、SSH 和 tar，不安装宿主机 Node.js 或开发环境。默认通过 `~/.ssh/id_ed25519_192_168_1_30` 登录 `root@192.168.1.30`，在 `/home/icon-family/builds/<标签>` 构建镜像，使用 3000 端口及 `/home/icon-family/data`，并通过健康检查后更新 `latest` 标签。
+
+```powershell
+# 仅在本机生成上传包和部署配置，不连接服务器
+npm run deploy:docker -- -PrepareOnly
+
+# 自定义部署参数
+npm run deploy:docker -- -Server 192.168.1.30 -Port 3000 -RemoteDirectory /home/icon-family -Tag minimal-v2
+```
+
+可通过 `-User` 和 `-IdentityFile` 指定 SSH 用户与密钥。服务器 `/home/icon-family/.env` 中的 `ADMIN_USER` / `ADMIN_PASSWORD` 会被保留并用于首次初始化，不重置已有账号。部署配置保存在 `/home/icon-family/docker-compose.yml`，每次替换前保留旧配置；脚本不删除旧镜像或数据。后续可在该目录执行 `docker compose up -d`、`docker compose logs`。原来的 `npm run deploy` 仍用于本机直接启动 Node.js 服务。
 
 ## 配置与数据
 

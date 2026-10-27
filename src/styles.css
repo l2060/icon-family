@@ -102,6 +102,12 @@ body {
 .icon-search {
   width: 230px;
 }
+.icon-sort-controls {
+  flex-shrink: 0;
+}
+.icon-sort-controls .ant-radio-group {
+  white-space: nowrap;
+}
 .push-right {
   margin-left: auto;
 }

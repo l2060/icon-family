@@ -1,18 +1,16 @@
 services:
-  iconfamily:
+  icon-family:
     build: .
-    container_name: iconfamily
+    image: ${ICONFAMILY_IMAGE:-icon-family:latest}
+    container_name: icon-family
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${ICONFAMILY_PORT:-3000}:3000"
     environment:
       PORT: 3000
       DATA_DIR: /data
       STORAGE_DRIVER: sqlite
-      ADMIN_USER: admin
-      ADMIN_PASSWORD: adminadmin
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-adminadmin}
     volumes:
-      - iconfamily-data:/data
-
-volumes:
-  iconfamily-data:
+      - ${ICONFAMILY_DATA_DIR:-/home/icon-family/data}:/data

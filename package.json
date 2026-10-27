@@ -20,26 +20,27 @@
     "test:runtime": "node scripts/check-runtime.mjs",
     "build": "npm run typecheck && vite build && node scripts/package.mjs --check",
     "package": "npm run build && node scripts/package.mjs",
-    "deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy.ps1"
+    "deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy.ps1",
+    "deploy:docker": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-docker.ps1"
   },
   "dependencies": {
-    "@ant-design/icons": "^6.3.4",
     "@napi-rs/canvas": "^1.0.13",
     "@xmldom/xmldom": "^0.9.12",
-    "antd": "^6.6.5",
-    "dompurify": "^3.4.15",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
     "svg2ttf": "^6.1.0"
   },
   "devDependencies": {
+    "@ant-design/icons": "^6.3.4",
     "@playwright/test": "^1.63.0",
     "@types/node": "^26.6.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "antd": "^6.6.5",
     "concurrently": "^10.0.5",
+    "dompurify": "^3.4.15",
     "prettier": "^3.9.8",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.0"
   }

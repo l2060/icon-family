@@ -3,6 +3,8 @@ import { App, Button, Flex, Input, Segmented, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { api, copyText } from '../../api';
 import { usePreferences } from '../../preferences';
+import { useUserPreferences } from '../../userPreferences';
+import { IconSortControls } from './IconSortControls';
 import type { Icon, IconFormat, ImportJob, Project, ProjectDetail } from '../../types';
 import { MoveIconsDialog, type MoveResult } from '../folders/MoveIconsDialog';
 import { CopyIconDialog } from './CopyIconDialog';
@@ -42,7 +44,12 @@ export const IconWorkspace = memo(function IconWorkspace({
   onFolderSelect: (id?: string) => void;
   onOrganizationChange: (project: Project, removed?: number[], moved?: MoveResult) => void;
 }) {
-  const { t } = usePreferences();
+  const { t, language } = usePreferences();
+  const { iconSort } = useUserPreferences();
+  const nameCollator = useMemo(
+    () => new Intl.Collator(language, { numeric: true, sensitivity: 'base' }),
+    [language],
+  );
   const { message, modal } = App.useApp();
   const { project, icons } = detail;
   const iconSaved = useCallback(
@@ -59,12 +66,25 @@ export const IconWorkspace = memo(function IconWorkspace({
   const [moving, setMoving] = useState<number[]>();
   const visible = useMemo(
     () =>
-      icons.filter(
-        (icon) =>
-          (folderId ? icon.folder_id === folderId : showAll || !icon.folder_id) &&
-          `${icon.name} ${icon.slug}`.toLowerCase().includes(search.toLowerCase()),
-      ),
-    [icons, search, folderId, showAll],
+      icons
+        .filter(
+          (icon) =>
+            (folderId ? icon.folder_id === folderId : showAll || !icon.folder_id) &&
+            `${icon.name} ${icon.slug}`.toLowerCase().includes(search.toLowerCase()),
+        )
+        .sort((a, b) => {
+          const direction = iconSort.direction === 'asc' ? 1 : -1;
+          if (iconSort.field === 'name') {
+            return direction * (nameCollator.compare(a.name, b.name) || a.id - b.id);
+          }
+          const aTime = Date.parse(a.created_at);
+          const bTime = Date.parse(b.created_at);
+          // Legacy records without a valid timestamp stay at the end in either direction.
+          if (!Number.isFinite(aTime)) return Number.isFinite(bTime) ? 1 : a.id - b.id;
+          if (!Number.isFinite(bTime)) return -1;
+          return direction * (aTime - bTime || a.id - b.id);
+        }),
+    [icons, search, folderId, showAll, iconSort, nameCollator],
   );
   const { selected, setSelected, toggle } = useIconSelection(icons, visible);
   useEffect(() => {
@@ -140,6 +160,7 @@ export const IconWorkspace = memo(function IconWorkspace({
               onChange={(value) => onViewChange(value === 'all')}
             />
           )}
+          <IconSortControls />
           <Input
             allowClear
             prefix={<SearchOutlined />}

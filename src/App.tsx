@@ -5,6 +5,7 @@ import type { User } from './types';
 import { Login } from './features/auth/Login';
 import { guardRoute } from './hooks/projectRoute';
 import { useContextMenuPolicy } from './hooks/useContextMenuPolicy';
+import { UserPreferencesProvider } from './userPreferences';
 const ApplicationLayout = lazy(() =>
   import('./layouts/ApplicationLayout').then((module) => ({ default: module.ApplicationLayout })),
 );
@@ -54,17 +55,19 @@ export function IconFamily() {
         </div>
       }
     >
-      <ApplicationLayout
-        user={user}
-        onLogout={() => {
-          void api('/auth/logout', 'POST')
-            .then(() => {
-              window.history.replaceState(null, '', '#/login');
-              setUser(null);
-            })
-            .catch((e) => message.error(e.message));
-        }}
-      />
+      <UserPreferencesProvider key={`${user.id}:${user.username}`} user={user}>
+        <ApplicationLayout
+          user={user}
+          onLogout={() => {
+            void api('/auth/logout', 'POST')
+              .then(() => {
+                window.history.replaceState(null, '', '#/login');
+                setUser(null);
+              })
+              .catch((e) => message.error(e.message));
+          }}
+        />
+      </UserPreferencesProvider>
     </Suspense>
   ) : (
     <Login onLogin={setUser} />
